@@ -22,6 +22,22 @@ export interface OrganizationCredential {
   license_key: string;
 }
 
+export interface JobPosting {
+  id: number;
+  title: string;
+  description: string;
+  deadline_at: string | null;
+  is_active: boolean;
+  created_at: string;
+  candidate_count: number;
+  debate_count: number;
+}
+
+export interface UploadResult {
+  created: { id: number; full_name: string; filename: string }[];
+  errors: { filename: string; detail: string }[];
+}
+
 export interface Candidate {
   id: number;
   full_name: string;

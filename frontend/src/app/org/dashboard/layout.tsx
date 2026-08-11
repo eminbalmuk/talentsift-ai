@@ -2,14 +2,13 @@
 
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { LayoutDashboard, Users } from "lucide-react";
+import { Briefcase } from "lucide-react";
 import { DashboardShell, type NavItem } from "@/components/dashboard-shell";
 import { Skeleton } from "@/components/ui/skeleton";
 import { apiGet, apiPost } from "@/lib/api";
 
 const NAV_ITEMS: NavItem[] = [
-  { label: "Genel Bakış", href: "/org/dashboard", icon: LayoutDashboard },
-  { label: "Adaylar", href: "/org/dashboard/candidates", icon: Users },
+  { label: "İş ilanları", href: "/org/dashboard", icon: Briefcase },
 ];
 
 export default function OrgDashboardLayout({ children }: { children: React.ReactNode }) {

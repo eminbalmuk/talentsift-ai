@@ -13,6 +13,7 @@ class HybridSearchService:
         self,
         *,
         organization_id: int,
+        job_posting_id: int,
         job_description: str,
         min_gpa: float | None = None,
         class_year: int | None = None,
@@ -22,6 +23,7 @@ class HybridSearchService:
         query_embedding = await self._mistral.embed(job_description)
         return await self._repository.search_candidates(
             organization_id=organization_id,
+            job_posting_id=job_posting_id,
             query_embedding=query_embedding,
             min_gpa=min_gpa,
             class_year=class_year,

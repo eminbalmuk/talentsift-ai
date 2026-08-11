@@ -1,6 +1,7 @@
 import asyncio
 import base64
 import itertools
+import random
 from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
@@ -9,6 +10,9 @@ import httpx
 from pydantic import BaseModel
 
 from talentsift_ai.models import MistralModel
+
+MAX_RATE_LIMIT_RETRIES = 4
+RETRY_BASE_DELAY_SECONDS = 1.0
 
 
 class MistralClientError(RuntimeError):
@@ -42,11 +46,14 @@ class MistralClient:
         await self.close()
 
     async def ocr_pdf(self, pdf_path: Path, model: str = MistralModel.OCR) -> str:
+        return await self.ocr_pdf_bytes(pdf_path.read_bytes(), model=model)
+
+    async def ocr_pdf_bytes(self, pdf_bytes: bytes, model: str = MistralModel.OCR) -> str:
         payload = {
             "model": model,
             "document": {
                 "type": "document_url",
-                "document_url": self._pdf_data_url(pdf_path),
+                "document_url": self._pdf_data_url(pdf_bytes),
             },
         }
         response = await self._post("/ocr", payload)
@@ -83,28 +90,43 @@ class MistralClient:
         return response_model.model_validate_json(content)
 
     async def embed(self, text: str, model: str = MistralModel.EMBEDDING) -> list[float]:
-        payload = {"model": model, "inputs": [text]}
+        payload = {"model": model, "input": [text]}
         response = await self._post("/embeddings", payload)
         return response["data"][0]["embedding"]
 
     async def _post(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
-        async with self._semaphore:
-            response = await self._client.post(
-                f"{self._base_url}{path}",
-                headers={
-                    "Authorization": f"Bearer {next(self._keys)}",
-                    "Content-Type": "application/json",
-                },
-                json=payload,
+        response: httpx.Response | None = None
+        for attempt in range(MAX_RATE_LIMIT_RETRIES):
+            async with self._semaphore:
+                response = await self._client.post(
+                    f"{self._base_url}{path}",
+                    headers={
+                        "Authorization": f"Bearer {next(self._keys)}",
+                        "Content-Type": "application/json",
+                    },
+                    json=payload,
+                )
+
+            if response.status_code != 429:
+                break
+            if attempt == MAX_RATE_LIMIT_RETRIES - 1:
+                break
+
+            retry_after = response.headers.get("retry-after")
+            delay = (
+                float(retry_after)
+                if retry_after
+                else RETRY_BASE_DELAY_SECONDS * (2**attempt) + random.uniform(0, 1)
             )
+            await asyncio.sleep(delay)
 
         if response.status_code >= 400:
             raise MistralClientError(f"Mistral API error {response.status_code}: {response.text}")
         return response.json()
 
     @staticmethod
-    def _pdf_data_url(pdf_path: Path) -> str:
-        encoded = base64.b64encode(pdf_path.read_bytes()).decode("ascii")
+    def _pdf_data_url(pdf_bytes: bytes) -> str:
+        encoded = base64.b64encode(pdf_bytes).decode("ascii")
         return f"data:application/pdf;base64,{encoded}"
 
     @staticmethod

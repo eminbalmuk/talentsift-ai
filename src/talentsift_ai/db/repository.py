@@ -17,7 +17,13 @@ from talentsift_ai.auth import (
     verify_secret,
 )
 from talentsift_ai.db.vector import to_pgvector
-from talentsift_ai.schemas import Candidate, CandidateCreate, DebateResult
+from talentsift_ai.schemas import (
+    Candidate,
+    CandidateCreate,
+    DebateResult,
+    JobPosting,
+    JobPostingCreate,
+)
 
 
 class CandidateRepository:
@@ -299,6 +305,55 @@ class CandidateRepository:
             return None
         return {**dict(row), "license_key": license_key}
 
+    async def create_job_posting(self, posting: JobPostingCreate) -> JobPosting:
+        await self._ensure_connected()
+        async with self._pool.acquire() as connection:
+            row = await connection.fetchrow(
+                """
+                INSERT INTO job_postings (organization_id, title, description, deadline_at)
+                VALUES ($1, $2, $3, NULLIF($4, '')::timestamp)
+                RETURNING id, is_active
+                """,
+                posting.organization_id,
+                posting.title,
+                posting.description,
+                posting.deadline_at,
+            )
+        return JobPosting(id=row["id"], is_active=row["is_active"], **posting.model_dump())
+
+    async def list_job_postings(self, organization_id: int) -> list[dict[str, Any]]:
+        await self._ensure_connected()
+        async with self._pool.acquire() as connection:
+            rows = await connection.fetch(
+                """
+                SELECT p.id, p.title, p.description, p.deadline_at, p.is_active, p.created_at,
+                       COUNT(DISTINCT c.id) AS candidate_count,
+                       COUNT(DISTINCT d.id) AS debate_count
+                FROM job_postings p
+                LEFT JOIN candidates c ON c.job_posting_id = p.id
+                LEFT JOIN debate_results d ON d.candidate_id = c.id
+                WHERE p.organization_id = $1
+                GROUP BY p.id
+                ORDER BY p.created_at DESC
+                """,
+                organization_id,
+            )
+        return [dict(row) for row in rows]
+
+    async def get_job_posting(self, posting_id: int, organization_id: int) -> dict[str, Any] | None:
+        await self._ensure_connected()
+        async with self._pool.acquire() as connection:
+            row = await connection.fetchrow(
+                """
+                SELECT id, organization_id, title, description, deadline_at, is_active, created_at
+                FROM job_postings
+                WHERE id = $1 AND organization_id = $2
+                """,
+                posting_id,
+                organization_id,
+            )
+        return None if row is None else dict(row)
+
     async def insert_candidate(self, candidate: CandidateCreate) -> Candidate:
         await self._ensure_connected()
         embedding = to_pgvector(candidate.cv_embedding) if candidate.cv_embedding else None
@@ -307,6 +362,7 @@ class CandidateRepository:
                 """
                 INSERT INTO candidates (
                     organization_id,
+                    job_posting_id,
                     full_name,
                     university,
                     gpa,
@@ -317,10 +373,11 @@ class CandidateRepository:
                     cv_embedding,
                     source_path
                 )
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::vector, $10)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::vector, $11)
                 RETURNING id
                 """,
                 candidate.organization_id,
+                candidate.job_posting_id,
                 candidate.full_name,
                 candidate.university,
                 candidate.gpa,
@@ -333,18 +390,21 @@ class CandidateRepository:
             )
         return Candidate(id=row["id"], **candidate.model_dump())
 
-    async def get_candidate(self, candidate_id: int, organization_id: int) -> Candidate | None:
+    async def get_candidate(
+        self, candidate_id: int, organization_id: int, job_posting_id: int
+    ) -> Candidate | None:
         await self._ensure_connected()
         async with self._pool.acquire() as connection:
             row = await connection.fetchrow(
                 """
-                SELECT id, organization_id, full_name, university, gpa, current_class,
-                       experience_years, skills, raw_cv_text, source_path
+                SELECT id, organization_id, job_posting_id, full_name, university, gpa,
+                       current_class, experience_years, skills, raw_cv_text, source_path
                 FROM candidates
-                WHERE id = $1 AND organization_id = $2
+                WHERE id = $1 AND organization_id = $2 AND job_posting_id = $3
                 """,
                 candidate_id,
                 organization_id,
+                job_posting_id,
             )
         if row is None:
             return None
@@ -354,6 +414,7 @@ class CandidateRepository:
         self,
         *,
         organization_id: int,
+        job_posting_id: int,
         min_gpa: float | None = None,
         class_year: int | None = None,
         min_experience_years: int | None = None,
@@ -361,9 +422,9 @@ class CandidateRepository:
         offset: int = 0,
     ) -> list[dict[str, Any]]:
         await self._ensure_connected()
-        where_clauses = ["organization_id = $1"]
-        values: list[Any] = [organization_id]
-        param_index = 1
+        where_clauses = ["organization_id = $1", "job_posting_id = $2"]
+        values: list[Any] = [organization_id, job_posting_id]
+        param_index = 2
 
         if min_gpa is not None:
             param_index += 1
@@ -419,6 +480,7 @@ class CandidateRepository:
         self,
         *,
         organization_id: int,
+        job_posting_id: int,
         query_embedding: list[float],
         min_gpa: float | None = None,
         class_year: int | None = None,
@@ -426,10 +488,9 @@ class CandidateRepository:
         limit: int = 50,
     ) -> list[dict[str, Any]]:
         await self._ensure_connected()
-        where_clauses = ["organization_id = $3", "cv_embedding IS NOT NULL"]
-        values: list[Any] = [to_pgvector(query_embedding), limit, organization_id]
-        param_index = 3
-        param_index += 1
+        where_clauses = ["organization_id = $3", "job_posting_id = $4", "cv_embedding IS NOT NULL"]
+        values: list[Any] = [to_pgvector(query_embedding), limit, organization_id, job_posting_id]
+        param_index = 4
 
         if min_gpa is not None:
             where_clauses.append(f"gpa >= ${param_index}")
@@ -489,7 +550,9 @@ class CandidateRepository:
             )
         return row["id"]
 
-    async def top_results(self, organization_id: int, limit: int = 5) -> list[dict[str, Any]]:
+    async def top_results(
+        self, organization_id: int, job_posting_id: int, limit: int = 5
+    ) -> list[dict[str, Any]]:
         await self._ensure_connected()
         async with self._pool.acquire() as connection:
             rows = await connection.fetch(
@@ -498,11 +561,12 @@ class CandidateRepository:
                        d.final_score, d.arbitrator_rationale, d.is_selected
                 FROM debate_results d
                 JOIN candidates c ON c.id = d.candidate_id
-                WHERE d.organization_id = $1
+                WHERE d.organization_id = $1 AND c.job_posting_id = $2
                 ORDER BY d.final_score DESC, d.created_at DESC
-                LIMIT $2
+                LIMIT $3
                 """,
                 organization_id,
+                job_posting_id,
                 limit,
             )
         return [dict(row) for row in rows]

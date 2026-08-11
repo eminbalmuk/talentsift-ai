@@ -8,26 +8,25 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Textarea } from "@/components/ui/textarea";
 import { StatusBadge } from "@/components/status-badge";
 import { apiGet, apiPost, ApiError } from "@/lib/api";
 import type { Candidate, DebateResult } from "@/lib/types";
 
 export default function CandidateDetailPage() {
-  const params = useParams<{ id: string }>();
-  const candidateId = params.id;
+  const params = useParams<{ id: string; candidateId: string }>();
+  const postingId = params.id;
+  const candidateId = params.candidateId;
 
   const [candidate, setCandidate] = useState<Candidate | null>(null);
   const [debate, setDebate] = useState<DebateResult | null>(null);
   const [loading, setLoading] = useState(true);
-  const [jobDescription, setJobDescription] = useState("");
   const [running, setRunning] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
       const data = await apiGet<{ candidate: Candidate; debate: DebateResult | null }>(
-        `/api/org/candidates/${candidateId}`,
+        `/api/org/postings/${postingId}/candidates/${candidateId}`,
       );
       setCandidate(data.candidate);
       setDebate(data.debate);
@@ -36,24 +35,18 @@ export default function CandidateDetailPage() {
     } finally {
       setLoading(false);
     }
-  }, [candidateId]);
+  }, [postingId, candidateId]);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- initial data fetch on mount
     load();
   }, [load]);
 
-  async function handleRunDebate(event: React.FormEvent) {
-    event.preventDefault();
-    if (!jobDescription.trim()) {
-      toast.error("Değerlendirme için bir iş tanımı girin.");
-      return;
-    }
+  async function handleRunDebate() {
     setRunning(true);
     try {
-      const result = await apiPost<DebateResult>("/api/org/debate", {
+      const result = await apiPost<DebateResult>(`/api/org/postings/${postingId}/debate`, {
         candidate_id: Number(candidateId),
-        job_description: jobDescription,
       });
       setDebate(result);
       toast.success("Çoklu ajan değerlendirmesi tamamlandı.");
@@ -131,27 +124,30 @@ export default function CandidateDetailPage() {
       </div>
 
       <div className="flex flex-col gap-4">
-        <Card className="border-border/60">
-          <CardHeader>
-            <CardTitle className="text-sm">Yeni değerlendirme çalıştır</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <form onSubmit={handleRunDebate} className="flex flex-col gap-3">
-              <Textarea
-                placeholder="Bu adayın değerlendirileceği iş tanımını yazın..."
-                value={jobDescription}
-                onChange={(event) => setJobDescription(event.target.value)}
-                rows={3}
-              />
-              <Button type="submit" disabled={running} className="self-start">
+        {!debate ? (
+          <Card className="border-border/60">
+            <CardHeader>
+              <CardTitle className="text-sm">Değerlendirme</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="mb-3 text-sm text-muted-foreground">
+                İlanın iş tanımı kullanılarak İyimser/Kötümser/Hakem ajan sürecini başlatın.
+              </p>
+              <Button onClick={handleRunDebate} disabled={running}>
                 {running ? "İyimser, kötümser ve hakem ajanlar çalışıyor..." : "Değerlendirmeyi başlat"}
               </Button>
-            </form>
-          </CardContent>
-        </Card>
+            </CardContent>
+          </Card>
+        ) : null}
 
         {debate ? (
           <div className="flex flex-col gap-4">
+            <div className="flex items-center justify-between">
+              <h2 className="text-sm font-medium text-foreground">Değerlendirme sonucu</h2>
+              <Button variant="outline" size="sm" onClick={handleRunDebate} disabled={running}>
+                {running ? "Çalışıyor..." : "Yeniden değerlendir"}
+              </Button>
+            </div>
             <div className="grid gap-4 sm:grid-cols-3">
               <Card className="border-border/60">
                 <CardContent className="flex flex-col items-center gap-1 py-4">
@@ -215,13 +211,7 @@ export default function CandidateDetailPage() {
               </Card>
             </div>
           </div>
-        ) : (
-          <Card className="border-dashed border-border/60 bg-muted/30">
-            <CardContent className="py-10 text-center text-sm text-muted-foreground">
-              Bu aday için henüz bir değerlendirme çalıştırılmadı.
-            </CardContent>
-          </Card>
-        )}
+        ) : null}
       </div>
     </div>
   );

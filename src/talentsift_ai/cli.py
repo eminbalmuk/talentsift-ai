@@ -12,15 +12,18 @@ from talentsift_ai.mistral_client import MistralClient
 from talentsift_ai.observability import configure_phoenix
 from talentsift_ai.pipeline import HybridSearchService, ResumeIngestionPipeline
 from talentsift_ai.pipeline.search import load_job_description
+from talentsift_ai.schemas import JobPostingCreate
 from talentsift_ai.settings import get_settings
 
 app = typer.Typer(help="TalentSift AI resume screening pipeline.")
 db_app = typer.Typer(help="Database commands.")
 auth_app = typer.Typer(help="B2B organization and credential commands.")
 admin_app = typer.Typer(help="Owner admin commands.")
+posting_app = typer.Typer(help="Job posting commands.")
 app.add_typer(db_app, name="db")
 app.add_typer(auth_app, name="auth")
 app.add_typer(admin_app, name="admin")
+app.add_typer(posting_app, name="posting")
 console = Console()
 
 
@@ -158,9 +161,41 @@ def serve_admin_panel(
     uvicorn.run("talentsift_ai.web.app:app", host=host, port=port, reload=False)
 
 
+@posting_app.command("create")
+def create_posting(
+    organization_id: Annotated[int, typer.Option(help="Organization ID owner of the posting.")],
+    title: Annotated[str, typer.Option(help="Job posting title.")],
+    description: Annotated[
+        str,
+        typer.Option(help="Job description text or path to a text file."),
+    ],
+    deadline: Annotated[
+        str | None,
+        typer.Option(help="Application deadline, e.g. 2026-09-01."),
+    ] = None,
+) -> None:
+    """Create a job posting for an organization."""
+
+    async def _create() -> None:
+        settings = get_settings()
+        async with CandidateRepository(settings.database_url) as repository:
+            posting = await repository.create_job_posting(
+                JobPostingCreate(
+                    organization_id=organization_id,
+                    title=title,
+                    description=load_job_description(description),
+                    deadline_at=deadline,
+                )
+            )
+            console.print(f"[green]Job posting created[/green] #{posting.id}: {posting.title}")
+
+    run_async(_create())
+
+
 @app.command()
 def ingest(
     organization_id: Annotated[int, typer.Option(help="Organization ID owner of the resumes.")],
+    job_posting_id: Annotated[int, typer.Option(help="Job posting ID the resumes belong to.")],
     resume_dir: Annotated[Path, typer.Option(help="Directory containing PDF resumes.")],
     concurrency: Annotated[int, typer.Option(help="Maximum concurrent resume jobs.")] = 8,
 ) -> None:
@@ -175,6 +210,7 @@ def ingest(
                     mistral_client=mistral,
                     repository=repository,
                     organization_id=organization_id,
+                    job_posting_id=job_posting_id,
                     max_concurrency=concurrency,
                 )
                 candidates = await pipeline.ingest_directory(resume_dir)
@@ -189,6 +225,7 @@ def ingest(
 @app.command()
 def rank(
     organization_id: Annotated[int, typer.Option(help="Organization ID to search within.")],
+    job_posting_id: Annotated[int, typer.Option(help="Job posting ID to search within.")],
     job_description: Annotated[
         str,
         typer.Option(help="Job description text or path to a text file."),
@@ -213,6 +250,7 @@ def rank(
                 service = HybridSearchService(mistral_client=mistral, repository=repository)
                 results = await service.rank(
                     organization_id=organization_id,
+                    job_posting_id=job_posting_id,
                     job_description=load_job_description(job_description),
                     min_gpa=min_gpa,
                     class_year=class_year,
@@ -227,6 +265,7 @@ def rank(
 @app.command()
 def debate(
     organization_id: Annotated[int, typer.Option(help="Organization ID owner of the candidate.")],
+    job_posting_id: Annotated[int, typer.Option(help="Job posting ID the candidate belongs to.")],
     candidate_id: Annotated[int, typer.Option(help="Candidate ID to evaluate.")],
     job_description: Annotated[
         str,
@@ -240,10 +279,13 @@ def debate(
         configure_phoenix(settings.phoenix_project_name, settings.phoenix_collector_endpoint)
         async with create_mistral_client() as mistral:
             async with CandidateRepository(settings.database_url) as repository:
-                candidate = await repository.get_candidate(candidate_id, organization_id)
+                candidate = await repository.get_candidate(
+                    candidate_id, organization_id, job_posting_id
+                )
                 if candidate is None:
                     raise typer.BadParameter(
-                        f"Candidate {candidate_id} was not found in organization {organization_id}."
+                        f"Candidate {candidate_id} was not found in organization "
+                        f"{organization_id} / posting {job_posting_id}."
                     )
 
                 graph = DebateGraph(mistral)
@@ -265,6 +307,7 @@ def debate(
 @app.command("top")
 def top_results(
     organization_id: Annotated[int, typer.Option(help="Organization ID to rank within.")],
+    job_posting_id: Annotated[int, typer.Option(help="Job posting ID to rank within.")],
     limit: Annotated[int, typer.Option(help="Number of final candidates.")] = 5,
 ) -> None:
     """Show globally ranked debate results."""
@@ -272,7 +315,9 @@ def top_results(
     async def _top() -> None:
         settings = get_settings()
         async with CandidateRepository(settings.database_url) as repository:
-            render_top_results(await repository.top_results(organization_id, limit=limit))
+            render_top_results(
+                await repository.top_results(organization_id, job_posting_id, limit=limit)
+            )
 
     run_async(_top())
 

@@ -20,8 +20,21 @@ class CVStructure(BaseModel):
     skills: list[str] = Field(default_factory=list, description="Prominent technical skills.")
 
 
+class JobPostingCreate(BaseModel):
+    organization_id: int
+    title: str = Field(min_length=1, max_length=255)
+    description: str = Field(min_length=1)
+    deadline_at: str | None = None
+
+
+class JobPosting(JobPostingCreate):
+    id: int
+    is_active: bool = True
+
+
 class CandidateCreate(CVStructure):
     organization_id: int
+    job_posting_id: int
     raw_cv_text: str
     cv_embedding: list[float] | None = None
     source_path: str | None = None

@@ -236,11 +236,11 @@ export default function AdminOrganizationsPage() {
           <TableHeader>
             <TableRow className="bg-muted/40">
               <TableHead>Ad</TableHead>
-              <TableHead>Giriş</TableHead>
-              <TableHead>Lisans anahtarı</TableHead>
+              <TableHead className="hidden sm:table-cell">Giriş</TableHead>
+              <TableHead className="hidden lg:table-cell">Lisans anahtarı</TableHead>
               <TableHead>Durum</TableHead>
-              <TableHead>Bitiş</TableHead>
-              <TableHead>Kullanım</TableHead>
+              <TableHead className="hidden md:table-cell">Bitiş</TableHead>
+              <TableHead className="hidden lg:table-cell">Kullanım</TableHead>
               <TableHead className="text-right">İşlemler</TableHead>
             </TableRow>
           </TableHeader>
@@ -251,8 +251,10 @@ export default function AdminOrganizationsPage() {
               return (
                 <TableRow key={org.id}>
                   <TableCell className="font-medium">{org.display_name}</TableCell>
-                  <TableCell className="text-muted-foreground">{org.username ?? "—"}</TableCell>
-                  <TableCell className="font-mono text-xs text-muted-foreground">
+                  <TableCell className="hidden text-muted-foreground sm:table-cell">
+                    {org.username ?? "—"}
+                  </TableCell>
+                  <TableCell className="hidden font-mono text-xs text-muted-foreground lg:table-cell">
                     {org.license_key_prefix ?? "—"}
                   </TableCell>
                   <TableCell>
@@ -275,7 +277,7 @@ export default function AdminOrganizationsPage() {
                       </SelectContent>
                     </Select>
                   </TableCell>
-                  <TableCell>
+                  <TableCell className="hidden md:table-cell">
                     <Input
                       type="date"
                       className="h-8 w-[140px]"
@@ -288,7 +290,7 @@ export default function AdminOrganizationsPage() {
                       }
                     />
                   </TableCell>
-                  <TableCell className="text-muted-foreground">
+                  <TableCell className="hidden text-muted-foreground lg:table-cell">
                     {org.candidate_count} CV / {org.debate_count} değerlendirme
                   </TableCell>
                   <TableCell>
