@@ -77,7 +77,7 @@ async def login(payload: OrgLoginRequest, response: Response) -> dict[str, Any]:
                 password=payload.password,
                 credential_pepper=settings.product_key_pepper,
             )
-    except (OSError, TimeoutError, asyncpg.PostgresError) as exc:
+    except (OSError, TimeoutError, ValueError, asyncpg.PostgresError) as exc:
         raise HTTPException(status_code=503, detail=DATABASE_ERROR_MESSAGE) from exc
     if identity is None:
         raise HTTPException(status_code=401, detail="Invalid organization credentials.")
@@ -140,7 +140,7 @@ async def list_candidates(
                 limit=limit,
                 offset=offset,
             )
-    except (OSError, TimeoutError, asyncpg.PostgresError) as exc:
+    except (OSError, TimeoutError, ValueError, asyncpg.PostgresError) as exc:
         raise HTTPException(status_code=503, detail=DATABASE_ERROR_MESSAGE) from exc
     return {"candidates": rows}
 
@@ -159,7 +159,7 @@ async def get_candidate(
             debate = await repository.latest_debate_result(
                 candidate_id, session["organization_id"]
             )
-    except (OSError, TimeoutError, asyncpg.PostgresError) as exc:
+    except (OSError, TimeoutError, ValueError, asyncpg.PostgresError) as exc:
         raise HTTPException(status_code=503, detail=DATABASE_ERROR_MESSAGE) from exc
     return {"candidate": candidate.model_dump(exclude={"cv_embedding"}), "debate": debate}
 
@@ -182,7 +182,7 @@ async def search_candidates(
                     min_experience_years=payload.min_experience_years,
                     limit=payload.limit,
                 )
-    except (OSError, TimeoutError, asyncpg.PostgresError) as exc:
+    except (OSError, TimeoutError, ValueError, asyncpg.PostgresError) as exc:
         raise HTTPException(status_code=503, detail=DATABASE_ERROR_MESSAGE) from exc
     return {"candidates": results}
 
@@ -196,7 +196,7 @@ async def top_rankings(
     try:
         async with CandidateRepository(settings.database_url) as repository:
             rows = await repository.top_results(session["organization_id"], limit=limit)
-    except (OSError, TimeoutError, asyncpg.PostgresError) as exc:
+    except (OSError, TimeoutError, ValueError, asyncpg.PostgresError) as exc:
         raise HTTPException(status_code=503, detail=DATABASE_ERROR_MESSAGE) from exc
     return {"results": rows}
 
@@ -223,6 +223,6 @@ async def run_debate(
                     job_description=payload.job_description,
                 )
                 result_id = await repository.save_debate_result(result)
-    except (OSError, TimeoutError, asyncpg.PostgresError) as exc:
+    except (OSError, TimeoutError, ValueError, asyncpg.PostgresError) as exc:
         raise HTTPException(status_code=503, detail=DATABASE_ERROR_MESSAGE) from exc
     return {"id": result_id, **result.model_dump()}

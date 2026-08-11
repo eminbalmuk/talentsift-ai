@@ -134,13 +134,18 @@ snippet entirely.
    or let `talentsift db init` run `CREATE EXTENSION IF NOT EXISTS vector` for you — the
    Supabase Postgres role has permission for it).
 2. Copy two connection strings from Project Settings → Database → Connection string:
-   - **Transaction pooler** (port `6543`, `?pgbouncer=true`) → `DATABASE_URL`. Used by the running
-     app; safe for many concurrent serverless-style connections.
+   - **Transaction pooler** (port `6543`) → `DATABASE_URL`. Used by the running app; safe for
+     many concurrent serverless-style connections.
    - **Session/direct** connection (port `5432`) → `DIRECT_DATABASE_URL`. Used only for running
      migrations, since PgBouncer's transaction mode doesn't reliably support the DDL statements
      migrations issue.
+
+   **Drop any `?pgbouncer=true` query parameter from both URLs.** That flag is for Prisma's
+   pooler-aware client — `asyncpg` doesn't recognize it and raises a `ValueError` on every
+   connection attempt (surfaces as a 500 on every endpoint that touches the database).
 3. `asyncpg` is already configured with `statement_cache_size=0` (see `db/repository.py`), which
-   is required for compatibility with PgBouncer's transaction-mode pooler.
+   is what actually makes it compatible with PgBouncer's transaction-mode pooler — no URL flag
+   needed.
 4. Run migrations once against the **direct** URL:
    ```powershell
    $env:DATABASE_URL = $env:DIRECT_DATABASE_URL
@@ -161,7 +166,7 @@ its required environment variables.
 
    | Variable | Value |
    | --- | --- |
-   | `DATABASE_URL` | Supabase transaction-pooler URL (port 6543, `?pgbouncer=true`) |
+   | `DATABASE_URL` | Supabase transaction-pooler URL (port 6543, **no** `?pgbouncer=true`) |
    | `DIRECT_DATABASE_URL` | Supabase direct URL (port 5432) — only needed if you run `talentsift db init` from the Render shell |
    | `MISTRAL_API_KEYS` | Comma-separated Mistral API keys |
 

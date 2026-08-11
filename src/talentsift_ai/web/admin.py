@@ -63,7 +63,7 @@ async def login(payload: AdminLoginRequest, response: Response) -> dict[str, Any
                 password=payload.password,
                 credential_pepper=settings.product_key_pepper,
             )
-    except (OSError, TimeoutError, asyncpg.PostgresError) as exc:
+    except (OSError, TimeoutError, ValueError, asyncpg.PostgresError) as exc:
         raise HTTPException(status_code=503, detail=DATABASE_ERROR_MESSAGE) from exc
     if identity is None:
         raise HTTPException(status_code=401, detail="Invalid admin credentials.")
@@ -100,7 +100,7 @@ async def organizations(_: dict[str, Any] = ADMIN_SESSION_DEPENDENCY) -> dict[st
     try:
         async with CandidateRepository(settings.database_url) as repository:
             rows = await repository.list_organizations()
-    except (OSError, TimeoutError, asyncpg.PostgresError) as exc:
+    except (OSError, TimeoutError, ValueError, asyncpg.PostgresError) as exc:
         raise HTTPException(status_code=503, detail=DATABASE_ERROR_MESSAGE) from exc
     return {"organizations": rows}
 
@@ -118,7 +118,7 @@ async def create_organization(
                 notes=payload.notes,
                 credential_pepper=settings.product_key_pepper,
             )
-    except (OSError, TimeoutError, asyncpg.PostgresError) as exc:
+    except (OSError, TimeoutError, ValueError, asyncpg.PostgresError) as exc:
         raise HTTPException(status_code=503, detail=DATABASE_ERROR_MESSAGE) from exc
     return {
         "organization_id": credential.organization_id,
@@ -145,7 +145,7 @@ async def update_organization_license(
                 license_expires_at=payload.license_expires_at,
                 notes=payload.notes,
             )
-    except (OSError, TimeoutError, asyncpg.PostgresError) as exc:
+    except (OSError, TimeoutError, ValueError, asyncpg.PostgresError) as exc:
         raise HTTPException(status_code=503, detail=DATABASE_ERROR_MESSAGE) from exc
     if updated is None:
         raise HTTPException(status_code=404, detail="Organization not found.")
@@ -164,7 +164,7 @@ async def rotate_organization_license(
                 organization_id=organization_id,
                 credential_pepper=settings.product_key_pepper,
             )
-    except (OSError, TimeoutError, asyncpg.PostgresError) as exc:
+    except (OSError, TimeoutError, ValueError, asyncpg.PostgresError) as exc:
         raise HTTPException(status_code=503, detail=DATABASE_ERROR_MESSAGE) from exc
     if rotated is None:
         raise HTTPException(status_code=404, detail="Organization not found.")
