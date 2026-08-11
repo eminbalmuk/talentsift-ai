@@ -50,6 +50,12 @@ class CandidateRepository:
         async with self._pool.acquire() as connection:
             await connection.execute(sql)
 
+    async def admin_user_exists(self) -> bool:
+        await self._ensure_connected()
+        async with self._pool.acquire() as connection:
+            row = await connection.fetchval("SELECT EXISTS(SELECT 1 FROM admin_users)")
+        return bool(row)
+
     async def provision_admin_user(self, *, credential_pepper: str = "") -> AdminCredential:
         await self._ensure_connected()
         username = generate_admin_username()

@@ -62,12 +62,24 @@ def init_db(
 
 
 @admin_app.command("provision")
-def provision_admin() -> None:
+def provision_admin(
+    skip_if_exists: Annotated[
+        bool,
+        typer.Option(
+            "--skip-if-exists",
+            help="Do nothing if an admin user already exists (safe to run on every startup).",
+        ),
+    ] = False,
+) -> None:
     """Create the owner admin login and print credentials once."""
 
     async def _provision() -> None:
         settings = get_settings()
         async with CandidateRepository(settings.database_url) as repository:
+            if skip_if_exists and await repository.admin_user_exists():
+                console.print("[yellow]Admin user already exists, skipping.[/yellow]")
+                return
+
             credential = await repository.provision_admin_user(
                 credential_pepper=settings.product_key_pepper,
             )

@@ -146,12 +146,10 @@ snippet entirely.
 3. `asyncpg` is already configured with `statement_cache_size=0` (see `db/repository.py`), which
    is what actually makes it compatible with PgBouncer's transaction-mode pooler — no URL flag
    needed.
-4. Run migrations once against the **direct** URL:
-   ```powershell
-   $env:DATABASE_URL = $env:DIRECT_DATABASE_URL
-   talentsift db init
-   talentsift admin provision
-   ```
+
+You don't need to run migrations by hand — the Render service does it on every startup (see
+below). If you'd rather run them locally against Supabase (e.g. to debug), point `DATABASE_URL`
+at the **direct** URL temporarily and run `talentsift db init`.
 
 ### 2. Backend (Render)
 
@@ -167,17 +165,23 @@ its required environment variables.
    | Variable | Value |
    | --- | --- |
    | `DATABASE_URL` | Supabase transaction-pooler URL (port 6543, **no** `?pgbouncer=true`) |
-   | `DIRECT_DATABASE_URL` | Supabase direct URL (port 5432) — only needed if you run `talentsift db init` from the Render shell |
+   | `DIRECT_DATABASE_URL` | Supabase direct URL (port 5432), used for migrations |
    | `MISTRAL_API_KEYS` | Comma-separated Mistral API keys |
 
    `COOKIE_SECURE` and `MISTRAL_BASE_URL` are already set in the blueprint.
-3. Deploy. Render injects `PORT`; the Docker `CMD` reads it automatically
-   (`talentsift admin serve --host 0.0.0.0 --port $PORT`).
-4. Run the one-time setup from the service's **Shell** tab in the Render dashboard:
-   ```bash
-   talentsift db init
-   talentsift admin provision
+3. Deploy. Render injects `PORT`; the Docker `CMD` reads it automatically. On every container
+   start it also runs `talentsift db init` (idempotent — safe to repeat) and
+   `talentsift admin provision --skip-if-exists` (only creates an admin the first time) before
+   starting the server. No Shell access needed — that's a paid Render feature we don't rely on.
+4. Open the service's **Logs** tab (free on every plan) and find the first boot's output:
    ```
+   Admin credential provisioned
+   Username: admin_...
+   Password: ...
+   ```
+   Copy that password now — only its hash is stored, it won't be shown again. If you miss it,
+   there's no recovery command yet; delete the row from `admin_users` in Supabase and redeploy
+   (or restart) the service to have it provisioned again.
 5. Note the service URL Render assigns (e.g. `https://talentsift-api.onrender.com`) — the
    frontend needs it as `BACKEND_URL` in the next step.
 
