@@ -1,0 +1,55 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "talentsift-ai"
+version = "0.1.0"
+description = "Scalable hybrid RAG pipeline for multi-stage resume screening with Mistral AI and LangGraph agents."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { file = "LICENSE" }
+dependencies = [
+    "asyncpg>=0.30.0",
+    "fastapi>=0.115.0",
+    "httpx>=0.28.0",
+    "langgraph>=0.2.60",
+    "pydantic>=2.10.0",
+    "pydantic-settings>=2.7.0",
+    "python-dotenv>=1.0.1",
+    "rich>=13.9.0",
+    "typer>=0.15.0",
+    "uvicorn>=0.34.0",
+]
+
+[project.optional-dependencies]
+observability = [
+    "arize-phoenix>=7.0.0",
+    "openinference-instrumentation-langchain>=0.1.30",
+]
+eval = [
+    "ragas>=0.2.8",
+]
+dev = [
+    "pytest>=8.3.0",
+    "pytest-asyncio>=0.25.0",
+    "respx>=0.22.0",
+    "ruff>=0.8.0",
+]
+
+[project.scripts]
+talentsift = "talentsift_ai.cli:app"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/talentsift_ai"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]

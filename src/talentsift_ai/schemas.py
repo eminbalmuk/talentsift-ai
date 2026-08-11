@@ -1,0 +1,53 @@
+from pydantic import BaseModel, Field, confloat, conint
+
+
+class CVStructure(BaseModel):
+    full_name: str = Field(description="Candidate full name.")
+    university: str | None = Field(
+        default=None,
+        description="Latest university attended or graduated.",
+    )
+    gpa: confloat(ge=0, le=4) | None = Field(
+        default=None,
+        description="Grade point average normalized to a 4.00 scale.",
+    )
+    current_class: conint(ge=1, le=5) = Field(
+        description="Current class year from 1-4, or 5 for graduated candidates.",
+    )
+    experience_years: conint(ge=0) = Field(
+        description="Total years of software or relevant work experience.",
+    )
+    skills: list[str] = Field(default_factory=list, description="Prominent technical skills.")
+
+
+class CandidateCreate(CVStructure):
+    organization_id: int
+    raw_cv_text: str
+    cv_embedding: list[float] | None = None
+    source_path: str | None = None
+
+
+class Candidate(CandidateCreate):
+    id: int
+
+
+class AgentAnalysis(BaseModel):
+    score: conint(ge=0, le=100)
+    arguments: str
+
+
+class ArbitratorReport(BaseModel):
+    final_score: confloat(ge=0, le=100)
+    rationale: str
+
+
+class DebateResult(BaseModel):
+    organization_id: int
+    candidate_id: int
+    optimist_score: int
+    optimist_arguments: str
+    pessimist_score: int
+    pessimist_arguments: str
+    final_score: float
+    arbitrator_rationale: str
+    is_selected: bool = False

@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: talentsift-api
+    env: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    plan: starter
+    healthCheckPath: /healthz
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: DIRECT_DATABASE_URL
+        sync: false
+      - key: MISTRAL_API_KEYS
+        sync: false
+      - key: MISTRAL_BASE_URL
+        value: https://api.mistral.ai/v1
+      - key: PRODUCT_KEY_PEPPER
+        generateValue: true
+      - key: ADMIN_SESSION_SECRET
+        generateValue: true
+      - key: COOKIE_SECURE
+        value: "true"
