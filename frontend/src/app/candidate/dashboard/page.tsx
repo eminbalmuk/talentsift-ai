@@ -20,7 +20,7 @@ import {
   User,
   Zap,
 } from "lucide-react";
-import { LogoMark } from "@/components/logo";
+import { LogoFull } from "@/components/logo";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -161,9 +161,7 @@ export default function CandidateDashboardPage() {
       <header className="border-b border-border/60 bg-card/60 backdrop-blur-md sticky top-0 z-20 px-4 sm:px-6 py-3.5">
         <div className="mx-auto flex max-w-6xl items-center justify-between gap-2">
           <div className="flex items-center gap-2.5">
-            <LogoMark size={26} />
-            <span className="text-sm font-semibold tracking-tight hidden sm:inline">TalentSift AI | Aday Portalı</span>
-            <span className="text-xs font-semibold tracking-tight sm:hidden">TalentSift Aday</span>
+            <LogoFull height={28} />
           </div>
 
           <div className="flex items-center gap-3">

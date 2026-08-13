@@ -66,15 +66,17 @@ def init_db(
 
 @admin_app.command("provision")
 def provision_admin(
+    username: Annotated[str | None, typer.Option(help="Custom admin username.")] = None,
+    password: Annotated[str | None, typer.Option(help="Custom admin password.")] = None,
     skip_if_exists: Annotated[
         bool,
         typer.Option(
             "--skip-if-exists",
-            help="Do nothing if an admin user already exists (safe to run on every startup).",
+            help="Do nothing if an admin user already exists.",
         ),
     ] = False,
 ) -> None:
-    """Create the owner admin login and print credentials once."""
+    """Create or update the owner admin login credentials."""
 
     async def _provision() -> None:
         settings = get_settings()
@@ -83,16 +85,18 @@ def provision_admin(
                 console.print("[yellow]Admin user already exists, skipping.[/yellow]")
                 return
 
+            admin_user = username or settings.admin_username or None
+            admin_pass = password or settings.admin_password or None
+
             credential = await repository.provision_admin_user(
+                username=admin_user,
+                password=admin_pass,
                 credential_pepper=settings.product_key_pepper,
             )
             console.print("[green]Admin credential provisioned[/green]")
             console.print(f"Admin ID: {credential.admin_id}")
             console.print(f"Username: {credential.username}")
             console.print(f"Password: {credential.password}")
-            console.print(
-                "Store this password and license key now. Only their hashes are saved."
-            )
 
     run_async(_provision())
 

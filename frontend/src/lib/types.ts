@@ -1,7 +1,7 @@
 export interface Organization {
   id: number;
   display_name: string;
-  license_status: "active" | "trial" | "suspended" | "expired";
+  license_status: "active" | "trial" | "pending" | "suspended" | "expired";
   license_key_prefix: string | null;
   license_started_at: string | null;
   license_expires_at: string | null;

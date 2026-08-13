@@ -115,6 +115,26 @@ export default function AdminOrganizationsPage() {
     }
   }
 
+  async function handleApprove(organizationId: number) {
+    setSavingId(organizationId);
+    try {
+      const data = await apiPost<{ message: string; license_key?: string }>(
+        `/api/admin/organizations/${organizationId}/approve`,
+      );
+      toast.success(
+        data.license_key
+          ? `Organizasyon onaylandı ve aktifleştirildi! Lisans anahtarı: ${data.license_key}`
+          : "Organizasyon onaylandı ve hesabı aktifleştirildi.",
+        { duration: 15000 },
+      );
+      await load();
+    } catch (error) {
+      toast.error(error instanceof ApiError ? error.message : "Onay işlemi başarısız oldu.");
+    } finally {
+      setSavingId(null);
+    }
+  }
+
   async function handleRotate(organizationId: number) {
     setRotatingId(organizationId);
     try {
@@ -269,7 +289,7 @@ export default function AdminOrganizationsPage() {
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        {["active", "trial", "suspended", "expired"].map((status) => (
+                        {["active", "trial", "pending", "suspended", "expired"].map((status) => (
                           <SelectItem key={status} value={status}>
                             <LicenseStatusBadge status={status} />
                           </SelectItem>
@@ -295,6 +315,16 @@ export default function AdminOrganizationsPage() {
                   </TableCell>
                   <TableCell>
                     <div className="flex items-center justify-end gap-2">
+                      {org.license_status === "pending" || !org.is_active ? (
+                        <Button
+                          size="sm"
+                          className="bg-emerald-600 hover:bg-emerald-700 text-white font-medium text-xs gap-1"
+                          disabled={savingId === org.id}
+                          onClick={() => handleApprove(org.id)}
+                        >
+                          Onayla & Aktifleştir
+                        </Button>
+                      ) : null}
                       <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
                         <input
                           type="checkbox"

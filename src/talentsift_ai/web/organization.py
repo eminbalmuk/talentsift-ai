@@ -81,6 +81,36 @@ async def _get_posting_or_404(
     return posting
 
 
+class OrgRegisterRequest(BaseModel):
+    display_name: str = Field(min_length=2, max_length=255)
+    username: str = Field(min_length=3, max_length=100)
+    password: str = Field(min_length=6)
+    notes: str | None = None
+
+
+@router.post("/register")
+async def register(payload: OrgRegisterRequest) -> dict[str, Any]:
+    settings = get_settings()
+    try:
+        async with CandidateRepository(settings.database_url) as repository:
+            res = await repository.create_organization_registration(
+                display_name=payload.display_name,
+                username=payload.username,
+                password=payload.password,
+                credential_pepper=settings.product_key_pepper,
+                notes=payload.notes,
+            )
+            return {
+                "ok": True,
+                "message": "Organizasyon kayıt talebiniz başarıyla alındı. Hesabınız yönetici onayından geçtikten sonra giriş yapabilirsiniz.",
+                "organization_id": res["organization_id"],
+            }
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except (OSError, TimeoutError, asyncpg.PostgresError) as exc:
+        raise HTTPException(status_code=503, detail=DATABASE_ERROR_MESSAGE) from exc
+
+
 @router.post("/login")
 async def login(payload: OrgLoginRequest, response: Response) -> dict[str, Any]:
     settings = get_settings()
@@ -98,7 +128,13 @@ async def login(payload: OrgLoginRequest, response: Response) -> dict[str, Any]:
     except (OSError, TimeoutError, ValueError, asyncpg.PostgresError) as exc:
         raise HTTPException(status_code=503, detail=DATABASE_ERROR_MESSAGE) from exc
     if identity is None:
-        raise HTTPException(status_code=401, detail="Invalid organization credentials.")
+        raise HTTPException(status_code=401, detail="Kullanıcı adı veya şifre hatalı.")
+
+    if identity.get("is_pending"):
+        raise HTTPException(
+            status_code=403,
+            detail="Hesabınız henüz yönetici onayından geçmemiştir. Onaylandığında giriş yapabilirsiniz.",
+        )
 
     token = create_signed_session(
         {

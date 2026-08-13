@@ -4,8 +4,8 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { toast } from "sonner";
-import { ArrowLeft, User, Mail, Lock, Sparkles, UserPlus } from "lucide-react";
-import { LogoMark } from "@/components/logo";
+import { ArrowLeft, Lock, Mail, Sparkles, User, UserPlus } from "lucide-react";
+import { LogoFull } from "@/components/logo";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -67,8 +67,8 @@ export default function CandidateLoginPage() {
 
       <div className="w-full max-w-md">
         <div className="mb-6 flex flex-col items-center text-center">
-          <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-primary/10 text-primary mb-3">
-            <LogoMark size={28} />
+          <div className="mb-3">
+            <LogoFull height={40} />
           </div>
           <h1 className="text-2xl font-bold tracking-tight text-foreground">Aday Portalı</h1>
           <p className="mt-1 text-sm text-muted-foreground">

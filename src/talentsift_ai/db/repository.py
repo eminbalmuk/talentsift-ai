@@ -62,10 +62,18 @@ class CandidateRepository:
             row = await connection.fetchval("SELECT EXISTS(SELECT 1 FROM admin_users)")
         return bool(row)
 
-    async def provision_admin_user(self, *, credential_pepper: str = "") -> AdminCredential:
+    async def provision_admin_user(
+        self,
+        *,
+        username: str | None = None,
+        password: str | None = None,
+        credential_pepper: str = "",
+    ) -> AdminCredential:
         await self._ensure_connected()
-        username = generate_admin_username()
-        password = generate_password()
+        admin_user = username or generate_admin_username()
+        admin_pass = password or generate_password()
+        username_norm = normalize_username(admin_user)
+
         async with self._pool.acquire() as connection:
             row = await connection.fetchrow(
                 """
@@ -76,19 +84,22 @@ class CandidateRepository:
                     password_prefix
                 )
                 VALUES ($1, $2, $3, $4)
-                RETURNING id
+                ON CONFLICT (username_normalized) DO UPDATE
+                SET password_hash = EXCLUDED.password_hash,
+                    password_prefix = EXCLUDED.password_prefix
+                RETURNING id, username
                 """,
-                username,
-                normalize_username(username),
-                hash_secret(password, pepper=credential_pepper),
-                secret_public_prefix(password),
+                admin_user,
+                username_norm,
+                hash_secret(admin_pass, pepper=credential_pepper),
+                secret_public_prefix(admin_pass),
             )
 
         return AdminCredential(
             admin_id=row["id"],
-            username=username,
-            password=password,
-            password_prefix=secret_public_prefix(password),
+            username=row["username"],
+            password=admin_pass,
+            password_prefix=secret_public_prefix(admin_pass),
         )
 
     async def authenticate_admin(
@@ -184,6 +195,67 @@ class CandidateRepository:
             license_key_prefix=secret_public_prefix(license_key),
         )
 
+    async def create_organization_registration(
+        self,
+        *,
+        display_name: str,
+        username: str,
+        password: str,
+        credential_pepper: str = "",
+        notes: str | None = None,
+    ) -> dict[str, Any]:
+        await self._ensure_connected()
+        username_clean = username.strip()
+        username_normalized = normalize_username(username_clean)
+        async with self._pool.acquire() as connection:
+            async with connection.transaction():
+                existing = await connection.fetchrow(
+                    "SELECT id FROM organization_users WHERE username_normalized = $1",
+                    username_normalized,
+                )
+                if existing:
+                    raise ValueError("Bu kullanıcı adı zaten kullanılmaktadır.")
+
+                organization_row = await connection.fetchrow(
+                    """
+                    INSERT INTO organizations (
+                        display_name,
+                        slug,
+                        license_status,
+                        is_active,
+                        notes
+                    )
+                    VALUES ($1, $2, 'pending', FALSE, $3)
+                    RETURNING id, display_name
+                    """,
+                    display_name,
+                    unique_slug(display_name),
+                    notes,
+                )
+                await connection.execute(
+                    """
+                    INSERT INTO organization_users (
+                        organization_id,
+                        username,
+                        username_normalized,
+                        password_hash,
+                        password_prefix
+                    )
+                    VALUES ($1, $2, $3, $4, $5)
+                    """,
+                    organization_row["id"],
+                    username_clean,
+                    username_normalized,
+                    hash_secret(password, pepper=credential_pepper),
+                    secret_public_prefix(password),
+                )
+
+        return {
+            "organization_id": organization_row["id"],
+            "display_name": organization_row["display_name"],
+            "status": "pending",
+        }
+
     async def authenticate_organization_user(
         self,
         *,
@@ -197,12 +269,11 @@ class CandidateRepository:
             row = await connection.fetchrow(
                 """
                 SELECT u.id AS user_id, u.organization_id, o.display_name,
-                       u.username, u.password_hash
+                       u.username, u.password_hash, o.is_active AS org_is_active,
+                       o.license_status, u.is_active AS user_is_active
                 FROM organization_users u
                 JOIN organizations o ON o.id = u.organization_id
                 WHERE u.username_normalized = $1
-                  AND u.is_active = TRUE
-                  AND o.is_active = TRUE
                 """,
                 username_normalized,
             )
@@ -211,6 +282,9 @@ class CandidateRepository:
 
             if not verify_secret(password, row["password_hash"], pepper=credential_pepper):
                 return None
+
+            if not row["org_is_active"] or row["license_status"] == "pending" or not row["user_is_active"]:
+                return {"is_pending": True, "display_name": row["display_name"]}
 
             await connection.execute(
                 "UPDATE organization_users SET last_login_at = CURRENT_TIMESTAMP WHERE id = $1",

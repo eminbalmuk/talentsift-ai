@@ -2,16 +2,15 @@ import Link from "next/link";
 import {
   ArrowRight,
   Briefcase,
+  CheckCircle2,
   FileSearch,
   Scale,
-  Settings,
   ShieldCheck,
   Sparkles,
-  Upload,
   UserCheck,
 } from "lucide-react";
 import { AuroraBackground } from "@/components/aurora-background";
-import { LogoMark } from "@/components/logo";
+import { LogoFull } from "@/components/logo";
 import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
@@ -19,23 +18,23 @@ import { cn } from "@/lib/utils";
 const STEPS = [
   {
     icon: UserCheck,
-    title: "1 Kere CV Yükleyin",
-    description: "Profilinizi oluşturun ve CV'nizi 1 kere yükleyin. Mistral OCR ve Vektörleme 1 kere çalışır.",
+    title: "1 Kere CV Yükleme",
+    description: "Adaylar özgeçmişlerini sisteme 1 kez yükler, profilleri otomatik oluşturulur.",
   },
   {
     icon: Sparkles,
-    title: "Tek Tıkla Başvurun",
-    description: "Açık ilanlara sıfır ek bekleme ve sıfır ek maliyetle tek tıkla anında başvurun.",
+    title: "Tek Tıkla Başvuru",
+    description: "Adaylar yayınlanan tüm açık pozisyonlara anında ve zahmetsizce başvurabilir.",
   },
   {
     icon: Scale,
-    title: "Pre-LLM Reranking",
-    description: "BM25 keyword eşleşmesi ve BGE Cross-Encoder donanım puanlaması ile Top 1.000 aday süzülür.",
+    title: "Akıllı Sıralama & Eleme",
+    description: "İş tanımına ve donanım kriterlerine en uygun adaylar öncelikli olarak sıralanır.",
   },
   {
     icon: ShieldCheck,
-    title: "Multi-Agent Düellosu",
-    description: "İyimser, Kötümser ve Hakem ajanlar CV'yi tartışarak adil, gerekçeli bir puan verir.",
+    title: "Objektif Değerlendirme",
+    description: "Aday yetkinlikleri tarafsız analiz raporları ve detaylı puanlama ile sunulur.",
   },
 ];
 
@@ -44,25 +43,17 @@ const PORTALS = [
     icon: UserCheck,
     title: "Aday Portalı",
     description:
-      "Hesap oluşturun, CV'nizi 1 kere yükleyin ve profilleştirin. Tüm şirket ilanlarını inceleyin ve tek tıkla başvurun.",
+      "Hesap oluşturun, özgeçmişinizi yükleyin ve tüm şirket ilanlarını inceleyerek tek tıkla başvurunuzu yapın.",
     href: "/candidate/login",
     cta: "Aday Girişi / Kayıt",
   },
   {
     icon: Briefcase,
-    title: "Organizasyon paneli",
+    title: "Kurumsal Şirket Paneli",
     description:
-      "İş ilanları oluşturun, başvuran veya toplu yüklenen adayları Pre-LLM Reranker ve Multi-Agent ile sıralayın.",
+      "İş ilanları oluşturun, başvuruları yönetin ve adayları otomatik akıllı sıralama süreçlerinden geçirin.",
     href: "/org/login",
-    cta: "Organizasyon girişi",
-  },
-  {
-    icon: Settings,
-    title: "Yönetici konsolu",
-    description:
-      "Yeni organizasyonlar oluşturun, lisans durumlarını ve son kullanma tarihlerini yönetin.",
-    href: "/admin/login",
-    cta: "Yönetici girişi",
+    cta: "Şirket Girişi / Kayıt Ol",
   },
 ];
 
@@ -72,60 +63,54 @@ export default function HomePage() {
       <AuroraBackground />
       <header className="mx-auto flex w-full max-w-6xl items-center justify-between px-6 py-6">
         <div className="flex items-center gap-2">
-          <LogoMark size={30} />
-          <span className="text-sm font-medium tracking-tight">TalentSift AI</span>
+          <LogoFull height={36} />
         </div>
-        <div className="flex items-center gap-1 sm:gap-2">
+        <div className="flex items-center gap-2">
           <Link
             href="/candidate/login"
-            className={cn(buttonVariants({ variant: "outline", size: "sm" }), "sm:h-8")}
+            className={cn(buttonVariants({ variant: "outline", size: "sm" }), "sm:h-9 text-xs font-medium")}
           >
-            Aday Girişi
+            Aday Portalı
           </Link>
           <Link
             href="/org/login"
-            className={cn(buttonVariants({ variant: "ghost", size: "sm" }), "sm:h-8")}
+            className={cn(buttonVariants({ size: "sm" }), "sm:h-9 text-xs font-medium")}
           >
-            Organizasyon girişi
-          </Link>
-          <Link href="/admin/login" className={cn(buttonVariants({ size: "sm" }), "sm:h-8")}>
-            Yönetici
+            Şirket Girişi / Kayıt
           </Link>
         </div>
       </header>
 
       <main className="mx-auto flex w-full max-w-6xl flex-1 flex-col px-6 pb-20 pt-8 sm:pt-16">
         <div className="max-w-2xl">
-          <span className="animate-fade-in-up inline-flex items-center rounded-full border border-border bg-muted/80 px-3 py-1 text-xs font-medium text-muted-foreground backdrop-blur-sm">
-            Mistral AI ile çalışır
+          <span className="animate-fade-in-up inline-flex items-center rounded-full border border-primary/20 bg-primary/10 px-3 py-1 text-xs font-medium text-primary backdrop-blur-sm">
+            Yapay Zekâ Destekli İşe Alım Platformu
           </span>
           <h1
-            className="animate-fade-in-up mt-5 text-4xl font-semibold tracking-tight text-foreground sm:text-5xl"
+            className="animate-fade-in-up mt-5 text-4xl font-bold tracking-tight text-foreground sm:text-5xl leading-tight"
             style={{ animationDelay: "80ms" }}
           >
-            Binlerce CV&apos;yi dakikalar içinde adil biçimde eleyin.
+            Binlerce CV&apos;yi dakikalar içinde adil ve hızlı biçimde eleyin.
           </h1>
           <p
-            className="animate-fade-in-up mt-4 text-lg text-muted-foreground"
+            className="animate-fade-in-up mt-4 text-lg text-muted-foreground leading-relaxed"
             style={{ animationDelay: "160ms" }}
           >
-            TalentSift AI, CV yüklemeden çoklu ajan tartışmasına kadar tüm işe alım huninizi
-            uçtan uca otomatikleştiren, yalnızca Mistral modelleriyle çalışan bir
-            değerlendirme platformudur.
+            TalentSift AI, özgeçmiş toplama sürecinden aday sıralamasına kadar tüm işe alım huninizi otomatikleştiren, tarafsız ve veriye dayalı bir değerlendirme platformudur.
           </p>
           <div
             className="animate-fade-in-up mt-8 flex flex-wrap items-center gap-3"
             style={{ animationDelay: "240ms" }}
           >
             <Link href="/org/login" className={cn(buttonVariants({ size: "lg" }))}>
-              Organizasyon panelini aç
+              Kurumsal Paneli Aç
               <ArrowRight className="h-4 w-4" />
             </Link>
             <Link
-              href="/admin/login"
+              href="/candidate/login"
               className={cn(buttonVariants({ size: "lg", variant: "outline" }))}
             >
-              Yönetici konsolu
+              Aday Girişi
             </Link>
           </div>
         </div>
@@ -210,8 +195,7 @@ export default function HomePage() {
                     Adil ve izlenebilir değerlendirme
                   </h3>
                   <p className="mt-0.5 text-sm text-muted-foreground">
-                    Hakem ajan, kararını yalnızca CV metnindeki kanıtlara dayandırır; cinsiyet,
-                    köken gibi örtülü verilerden etkilenmez.
+                    Değerlendirme sistemimiz kararlarını yalnızca özgeçmişteki doğrulanabilir kanıtlara dayandırır; tarafsız ve adil sonuçlar üretir.
                   </p>
                 </div>
               </div>
@@ -221,7 +205,7 @@ export default function HomePage() {
       </main>
 
       <footer className="mx-auto w-full max-w-6xl px-6 py-6 text-xs text-muted-foreground">
-        TalentSift AI &mdash; Mistral OCR, embeddings ve LangGraph çoklu ajan pipeline&apos;ı.
+        TalentSift AI &mdash; Kurumsal Akıllı İşe Alım ve Özgeçmiş Eleme Platformu.
       </footer>
     </div>
   );

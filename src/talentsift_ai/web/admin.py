@@ -27,7 +27,7 @@ class OrganizationCreateRequest(BaseModel):
 
 
 class OrganizationLicenseUpdateRequest(BaseModel):
-    license_status: str = Field(pattern="^(active|trial|suspended|expired)$")
+    license_status: str = Field(pattern="^(active|trial|suspended|expired|pending)$")
     is_active: bool
     license_expires_at: str | None = None
     notes: str | None = Field(default=None, max_length=2000)
@@ -150,6 +150,35 @@ async def update_organization_license(
     if updated is None:
         raise HTTPException(status_code=404, detail="Organization not found.")
     return {"organization": updated}
+
+
+@router.post("/organizations/{organization_id}/approve")
+async def approve_organization(
+    organization_id: int,
+    _: dict[str, Any] = ADMIN_SESSION_DEPENDENCY,
+) -> dict[str, Any]:
+    settings = get_settings()
+    try:
+        async with CandidateRepository(settings.database_url) as repository:
+            updated = await repository.update_organization_license(
+                organization_id=organization_id,
+                license_status="active",
+                is_active=True,
+            )
+            rotated = await repository.rotate_organization_license_key(
+                organization_id=organization_id,
+                credential_pepper=settings.product_key_pepper,
+            )
+    except (OSError, TimeoutError, ValueError, asyncpg.PostgresError) as exc:
+        raise HTTPException(status_code=503, detail=DATABASE_ERROR_MESSAGE) from exc
+    if updated is None or rotated is None:
+        raise HTTPException(status_code=404, detail="Organization not found.")
+    return {
+        "status": "ok",
+        "message": "Organizasyon başarıyla onaylandı ve hesabı aktifleştirildi.",
+        "organization": updated,
+        "license_key": rotated.get("license_key"),
+    }
 
 
 @router.post("/organizations/{organization_id}/license/rotate")

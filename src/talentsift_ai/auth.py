@@ -49,18 +49,28 @@ def generate_license_key() -> str:
 
 def hash_secret(secret: str, pepper: str = "") -> str:
     normalized_secret = secret.strip()
+    salt = pepper.encode("utf-8") if pepper else b"talentsift_ai_salt"
+    key = hashlib.pbkdf2_hmac("sha256", normalized_secret.encode("utf-8"), salt, 100_000)
+    return key.hex()
+
+
+def verify_secret(secret: str, expected_hash: str, pepper: str = "") -> bool:
+    actual_pbkdf2 = hash_secret(secret, pepper=pepper)
+    if hmac.compare_digest(actual_pbkdf2, expected_hash):
+        return True
+
+    # Legacy HMAC-SHA256 fallback check for existing hashes
+    normalized_secret = secret.strip()
     if pepper:
-        return hmac.new(
+        legacy_hash = hmac.new(
             pepper.encode("utf-8"),
             normalized_secret.encode("utf-8"),
             hashlib.sha256,
         ).hexdigest()
-    return hashlib.sha256(normalized_secret.encode("utf-8")).hexdigest()
+    else:
+        legacy_hash = hashlib.sha256(normalized_secret.encode("utf-8")).hexdigest()
 
-
-def verify_secret(secret: str, expected_hash: str, pepper: str = "") -> bool:
-    actual_hash = hash_secret(secret, pepper=pepper)
-    return hmac.compare_digest(actual_hash, expected_hash)
+    return hmac.compare_digest(legacy_hash, expected_hash)
 
 
 def secret_public_prefix(secret: str) -> str:

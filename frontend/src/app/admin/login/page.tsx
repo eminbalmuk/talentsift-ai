@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { toast } from "sonner";
 import { AuroraBackground } from "@/components/aurora-background";
-import { LogoMark } from "@/components/logo";
+import { LogoFull } from "@/components/logo";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -36,7 +36,7 @@ export default function AdminLoginPage() {
       <AuroraBackground />
       <Card className="animate-fade-in-up w-full max-w-sm border-border/60 bg-card/90 shadow-sm backdrop-blur-sm">
         <CardHeader className="items-center text-center">
-          <LogoMark size={36} className="mb-1" />
+          <LogoFull height={36} className="mb-2" />
           <CardTitle className="text-lg">Yönetici konsolu</CardTitle>
           <CardDescription>Organizasyon ve lisans yönetimine giriş yapın.</CardDescription>
         </CardHeader>

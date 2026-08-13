@@ -11,6 +11,7 @@ const TONES = {
 const LICENSE_TONE: Record<string, keyof typeof TONES> = {
   active: "green",
   trial: "blue",
+  pending: "amber",
   suspended: "amber",
   expired: "red",
 };

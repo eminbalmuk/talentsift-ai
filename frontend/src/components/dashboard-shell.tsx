@@ -13,7 +13,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
-import { LogoMark } from "@/components/logo";
+import { LogoFull } from "@/components/logo";
 import { cn } from "@/lib/utils";
 
 export interface NavItem {
@@ -36,11 +36,7 @@ function SidebarContent({
   return (
     <div className="flex h-full flex-col bg-[#0c1c34] px-3 py-5 text-sky-100">
       <div className="mb-6 flex items-center gap-2.5 px-2">
-        <LogoMark size={28} invert className="shrink-0" />
-        <div className="flex flex-col overflow-hidden leading-none">
-          <span className="truncate text-[13px] font-medium text-white">{brand}</span>
-          <span className="mt-1 truncate text-[11px] text-sky-300/50">{workspace}</span>
-        </div>
+        <LogoFull height={28} className="shrink-0" />
       </div>
 
       <nav className="flex flex-1 flex-col gap-0.5">

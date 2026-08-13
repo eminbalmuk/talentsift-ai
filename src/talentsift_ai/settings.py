@@ -11,6 +11,8 @@ class Settings(BaseSettings):
     mistral_base_url: str = Field(default="https://api.mistral.ai/v1")
     product_key_pepper: str = Field(default="")
     admin_session_secret: str = Field(default="")
+    admin_username: str = Field(default="admin")
+    admin_password: str = Field(default="")
     cookie_secure: bool = Field(default=False)
     phoenix_project_name: str = Field(default="talentsift-ai")
     phoenix_collector_endpoint: str | None = Field(default=None)
