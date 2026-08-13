@@ -54,18 +54,64 @@ export interface Candidate {
 export interface RankedCandidate extends Candidate {
   raw_cv_text: string;
   similarity: number;
+  pre_llm_score?: number;
+  relevance_score?: number;
+  competency_score?: number;
 }
 
 export interface DebateResult {
   id?: number;
+  candidate_id: number;
   optimist_score: number;
   optimist_arguments: string;
   pessimist_score: number;
   pessimist_arguments: string;
   final_score: number;
   arbitrator_rationale: string;
-  is_selected: boolean;
+  is_selected?: boolean;
   created_at?: string;
+}
+
+export interface CandidateUser {
+  id: number;
+  email: string;
+  full_name: string;
+  is_guest: boolean;
+  created_at: string;
+}
+
+export interface CandidateProfile {
+  candidate_id: number;
+  full_name: string;
+  email: string;
+  university: string | null;
+  gpa: number | null;
+  current_class: number;
+  experience_years: number;
+  skills: string[];
+  raw_cv_text: string;
+  source_path: string | null;
+  has_embedding: boolean;
+  updated_at: string;
+}
+
+export interface OpenJobPosting {
+  id: number;
+  organization_id: number;
+  organization_name: string;
+  title: string;
+  description: string;
+  deadline_at: string | null;
+  created_at: string;
+}
+
+export interface JobApplication {
+  application_id: number;
+  job_posting_id: number;
+  job_title: string;
+  organization_name: string;
+  status: string;
+  applied_at: string;
 }
 
 export interface TopResult {

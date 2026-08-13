@@ -323,21 +323,28 @@ def top_results(
 
 
 def render_rankings(results: list[dict]) -> None:
-    table = Table(title="Hybrid Search Rankings")
+    table = Table(title="Pre-LLM Hybrid Search & Reranking Results")
     table.add_column("ID")
     table.add_column("Name")
     table.add_column("GPA")
     table.add_column("Class")
     table.add_column("Experience")
-    table.add_column("Similarity")
+    table.add_column("Pre-LLM Score")
+    table.add_column("Relevance")
+    table.add_column("Competency")
     for row in results:
+        pre_llm = row.get("pre_llm_score", row.get("similarity", 0.0))
+        rel = row.get("relevance_score", row.get("similarity", 0.0))
+        comp = row.get("competency_score", 0.0)
         table.add_row(
             str(row["id"]),
             row["full_name"],
-            "" if row["gpa"] is None else str(row["gpa"]),
+            "" if row.get("gpa") is None else str(row["gpa"]),
             str(row["current_class"]),
             str(row["experience_years"]),
-            f"{row['similarity']:.4f}",
+            f"{pre_llm:.4f}",
+            f"{rel:.4f}",
+            f"{comp:.4f}",
         )
     console.print(table)
 

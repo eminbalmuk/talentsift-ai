@@ -4,36 +4,40 @@ Bu döküman, 100.000+ CV'yi ölçeklenebilir, maliyet ve hız odaklı, asenkron
 
 ---
 
-## 1. MİMARİ GENEL BAKIŞ (MULTI-STAGE FILTER PIPELINE)
+## 1. MİMARİ GENEL BAKIŞ (MULTI-STAGE FILTER & PRE-LLM RERANKING PIPELINE)
 
-Sistem, token maliyetlerini düşürmek ve hız limitlerine (Rate Limits) takılmamak için 3 aşamalı bir eleme hunisi kullanır:
-
+Sistem; Render (Backend API), Supabase (Database/pgvector/BM25 FTS) ve Vercel (Next.js Frontend) altyapısında token maliyetlerini düşürmek ve hız limitlerine (Rate Limits) takılmamak için 4 aşamalı bir eleme hunisi kullanır:
 
 ```
 
-[100.000 CV (PDF)] ──> 1. AŞAMA: mistral-ocr & ministral-3b (Katı Filtreleme) ──> [~5.000 CV]
-│
-▼
-2. AŞAMA: mistral-embed & pgvector (Semantik Sıralama) ──> [~50 CV]
-│
-▼
-3. AŞAMA: LangGraph Multi-Agent Debate (Derin Analiz) ──> [İstenen Sayıda Aday]
+[100.000 CV (PDF/S3)] 
+     │
+     ▼ 1. AŞAMA: mistral-ocr & ministral-3b (Sert Filtreleme - Deneyim, GANO, Sınıf) ──> [~10.000 CV]
+     │
+     ▼ 2. AŞAMA: Supabase Hybrid Search (BM25 tsvector + mistral-embed pgvector RRF) ──> [~2.000 CV]
+     │
+     ▼ 3. AŞAMA: Pre-LLM Reranker (FlashRank ONNX Cross-Encoder + Competency Score) ──> [Top 1.000 / Top 50 Aday]
+     │
+     ▼ 4. AŞAMA: LangGraph Multi-Agent Debate (Mistral Small/Large Derin Analiz) ──> [İstenen Sayıda Aday]
 
 ```
 
 ---
 
-## 2. MİSTRAL AI MODEL DAĞILIM MATRİSİ
+## 2. MİSTRAL AI & PRE-LLM MODEL DAĞILIM MATRİSİ
 
-Uygulama esnasında API limitlerini optimize etmek için her görev için tanımlanmış spesifik Mistral modelleri asenkron (`asyncio`) olarak çağrılacaktır:
+Uygulama esnasında API limitlerini optimize etmek için her görev için tanımlanmış spesifik modeller asenkron (`asyncio`) olarak çağrılacaktır:
 
-| Pipeline Aşaması | Görev | Model Adı | Hedef Metrik / Limit Avantajı |
+| Pipeline Aşaması | Görev | Model Adı / Teknoloji | Hedef Metrik / Limit Avantajı |
 | :--- | :--- | :--- | :--- |
 | **Aşama 1 (Parsing)** | PDF mizanpajını bozmadan metne çevirme | `mistral-ocr-2512` | 1.00 RPS / Tablo & Sütun koruma |
 | **Aşama 1 (Extraction)** | Metinden Pydantic/JSON şeması çıkarma | `ministral-3b-2512` | **12.50 RPS** / 1.3M TPM (Yüksek Hız) |
 | **Aşama 2 (Embedding)** | Semantik arama için vektör üretimi | `mistral-embed-2312` | **20.00.000 TPM** (Büyük Veri Havuzu) |
-| **Aşama 3 (Debate)** | İyimser ve Kötümser ajan analizleri | `mistral-small-2506` | 5.00 RPS / 2.25M TPM (Dengeli Akıl Yürütme) |
+| **Aşama 2 (Hybrid Search)** | Anahtar Kelime + Semantik Arama Birleştirme | Supabase BM25 (`tsvector`) + RRF | $0 API Maliyeti, Hızlı Filtreleme |
+| **Aşama 3 (Pre-LLM Rerank)**| Cross-Encoder + Donanım Puanı ile Top 1000 Seçimi | `FlashRank` ONNX (`bge-reranker`) | Render CPU'da Sıfır API Maliyeti, Milisaniye Yanıt Süresi |
+| **Aşama 4 (Debate)** | İyimser ve Kötümser ajan analizleri | `mistral-small-2506` | 5.00 RPS / 2.25M TPM (Dengeli Akıl Yürütme) |
 | **Aşama 4 (Arbitration)**| Hakem Kararı ve Nihai Puanlama | `mistral-large-2512` | Üst Düzey Muhakeme ve Adil Eleştiri |
+
 
 ---
 

@@ -8,6 +8,7 @@ import {
   ShieldCheck,
   Sparkles,
   Upload,
+  UserCheck,
 } from "lucide-react";
 import { AuroraBackground } from "@/components/aurora-background";
 import { LogoMark } from "@/components/logo";
@@ -17,33 +18,41 @@ import { cn } from "@/lib/utils";
 
 const STEPS = [
   {
-    icon: Upload,
-    title: "CV'leri yükleyin",
-    description: "Bir iş ilanı açın, adayların PDF özgeçmişlerini panelden sürükleyip bırakın.",
+    icon: UserCheck,
+    title: "1 Kere CV Yükleyin",
+    description: "Profilinizi oluşturun ve CV'nizi 1 kere yükleyin. Mistral OCR ve Vektörleme 1 kere çalışır.",
   },
   {
     icon: Sparkles,
-    title: "OCR + Yapılandırma",
-    description: "mistral-ocr ve ministral-3b, saniyeler içinde CV'leri yapılandırılmış veriye dönüştürür.",
+    title: "Tek Tıkla Başvurun",
+    description: "Açık ilanlara sıfır ek bekleme ve sıfır ek maliyetle tek tıkla anında başvurun.",
   },
   {
     icon: Scale,
-    title: "Hibrit Sıralama",
-    description: "pgvector ile SQL filtreleri ve semantik benzerlik birleşerek en uygun adaylar öne çıkar.",
+    title: "Pre-LLM Reranking",
+    description: "BM25 keyword eşleşmesi ve BGE Cross-Encoder donanım puanlaması ile Top 1.000 aday süzülür.",
   },
   {
     icon: ShieldCheck,
-    title: "Çoklu Ajan Değerlendirmesi",
-    description: "İyimser, kötümser ve hakem ajanları CV'yi tartışarak adil, gerekçeli bir puan üretir.",
+    title: "Multi-Agent Düellosu",
+    description: "İyimser, Kötümser ve Hakem ajanlar CV'yi tartışarak adil, gerekçeli bir puan verir.",
   },
 ];
 
 const PORTALS = [
   {
+    icon: UserCheck,
+    title: "Aday Portalı",
+    description:
+      "Hesap oluşturun, CV'nizi 1 kere yükleyin ve profilleştirin. Tüm şirket ilanlarını inceleyin ve tek tıkla başvurun.",
+    href: "/candidate/login",
+    cta: "Aday Girişi / Kayıt",
+  },
+  {
     icon: Briefcase,
     title: "Organizasyon paneli",
     description:
-      "İş ilanları oluşturun, her ilana özel CV yükleyin, adayları filtreleyin veya iş tanımına göre semantik sıralayın, çoklu ajan değerlendirmesini tek tıkla başlatın.",
+      "İş ilanları oluşturun, başvuran veya toplu yüklenen adayları Pre-LLM Reranker ve Multi-Agent ile sıralayın.",
     href: "/org/login",
     cta: "Organizasyon girişi",
   },
@@ -51,7 +60,7 @@ const PORTALS = [
     icon: Settings,
     title: "Yönetici konsolu",
     description:
-      "Yeni organizasyonlar oluşturun, lisans durumlarını ve son kullanma tarihlerini yönetin, lisans anahtarlarını gerektiğinde yenileyin.",
+      "Yeni organizasyonlar oluşturun, lisans durumlarını ve son kullanma tarihlerini yönetin.",
     href: "/admin/login",
     cta: "Yönetici girişi",
   },
@@ -68,13 +77,19 @@ export default function HomePage() {
         </div>
         <div className="flex items-center gap-1 sm:gap-2">
           <Link
+            href="/candidate/login"
+            className={cn(buttonVariants({ variant: "outline", size: "sm" }), "sm:h-8")}
+          >
+            Aday Girişi
+          </Link>
+          <Link
             href="/org/login"
             className={cn(buttonVariants({ variant: "ghost", size: "sm" }), "sm:h-8")}
           >
             Organizasyon girişi
           </Link>
           <Link href="/admin/login" className={cn(buttonVariants({ size: "sm" }), "sm:h-8")}>
-            Yönetici girişi
+            Yönetici
           </Link>
         </div>
       </header>

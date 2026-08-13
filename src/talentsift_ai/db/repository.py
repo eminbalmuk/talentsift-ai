@@ -395,17 +395,34 @@ class CandidateRepository:
     ) -> Candidate | None:
         await self._ensure_connected()
         async with self._pool.acquire() as connection:
+            # 1. Try candidate_profiles + job_applications
             row = await connection.fetchrow(
                 """
-                SELECT id, organization_id, job_posting_id, full_name, university, gpa,
-                       current_class, experience_years, skills, raw_cv_text, source_path
-                FROM candidates
-                WHERE id = $1 AND organization_id = $2 AND job_posting_id = $3
+                SELECT p.candidate_id AS id, a.organization_id, a.job_posting_id, u.full_name,
+                       p.university, p.gpa, p.current_class, p.experience_years, p.skills,
+                       p.raw_cv_text, p.source_path
+                FROM job_applications a
+                JOIN candidate_profiles p ON p.candidate_id = a.candidate_id
+                JOIN candidate_users u ON u.id = a.candidate_id
+                WHERE p.candidate_id = $1 AND a.organization_id = $2 AND a.job_posting_id = $3
                 """,
                 candidate_id,
                 organization_id,
                 job_posting_id,
             )
+            if row is None:
+                # 2. Fallback to legacy candidates table
+                row = await connection.fetchrow(
+                    """
+                    SELECT id, organization_id, job_posting_id, full_name, university, gpa,
+                           current_class, experience_years, skills, raw_cv_text, source_path
+                    FROM candidates
+                    WHERE id = $1 AND organization_id = $2 AND job_posting_id = $3
+                    """,
+                    candidate_id,
+                    organization_id,
+                    job_posting_id,
+                )
         if row is None:
             return None
         return self._row_to_candidate(row)
@@ -422,6 +439,44 @@ class CandidateRepository:
         offset: int = 0,
     ) -> list[dict[str, Any]]:
         await self._ensure_connected()
+        app_where = ["a.organization_id = $1", "a.job_posting_id = $2"]
+        app_values: list[Any] = [organization_id, job_posting_id]
+        param_index = 2
+
+        if min_gpa is not None:
+            param_index += 1
+            app_where.append(f"p.gpa >= ${param_index}")
+            app_values.append(min_gpa)
+        if class_year is not None:
+            param_index += 1
+            app_where.append(f"p.current_class = ${param_index}")
+            app_values.append(class_year)
+        if min_experience_years is not None:
+            param_index += 1
+            app_where.append(f"p.experience_years >= ${param_index}")
+            app_values.append(min_experience_years)
+
+        limit_index = param_index + 1
+        offset_index = param_index + 2
+        app_values.extend([limit, offset])
+
+        app_sql = f"""
+            SELECT p.candidate_id AS id, u.full_name, p.university, p.gpa, p.current_class,
+                   p.experience_years, p.skills, p.source_path, a.applied_at AS created_at
+            FROM job_applications a
+            JOIN candidate_profiles p ON p.candidate_id = a.candidate_id
+            JOIN candidate_users u ON u.id = a.candidate_id
+            WHERE {" AND ".join(app_where)}
+            ORDER BY a.applied_at DESC
+            LIMIT ${limit_index} OFFSET ${offset_index}
+        """
+
+        async with self._pool.acquire() as connection:
+            rows = await connection.fetch(app_sql, *app_values)
+            if rows:
+                return [dict(row) for row in rows]
+
+        # Secondary: Fallback to candidates table
         where_clauses = ["organization_id = $1", "job_posting_id = $2"]
         values: list[Any] = [organization_id, job_posting_id]
         param_index = 2
@@ -519,6 +574,132 @@ class CandidateRepository:
             rows = await connection.fetch(sql, *values)
         return [dict(row) for row in rows]
 
+    async def hybrid_search_candidates(
+        self,
+        *,
+        organization_id: int,
+        job_posting_id: int,
+        query_text: str,
+        query_embedding: list[float],
+        min_gpa: float | None = None,
+        class_year: int | None = None,
+        min_experience_years: int | None = None,
+        limit: int = 2000,
+    ) -> list[dict[str, Any]]:
+        """
+        Hybrid search combining Supabase Full-Text Search (BM25) and pgvector Cosine Similarity.
+        Retrieves candidates for pre-LLM reranking.
+        """
+        await self._ensure_connected()
+        where_clauses = ["organization_id = $3", "job_posting_id = $4"]
+        values: list[Any] = [
+            to_pgvector(query_embedding),
+            limit,
+            organization_id,
+            job_posting_id,
+            query_text,
+        ]
+        param_index = 5
+
+        if min_gpa is not None:
+            param_index += 1
+            where_clauses.append(f"gpa >= ${param_index}")
+            values.append(min_gpa)
+        if class_year is not None:
+            param_index += 1
+            where_clauses.append(f"current_class = ${param_index}")
+            values.append(class_year)
+        if min_experience_years is not None:
+            param_index += 1
+            where_clauses.append(f"experience_years >= ${param_index}")
+            values.append(min_experience_years)
+
+        # 1. Primary Query: Search Candidate Self-Service Applications
+        app_where = [
+            "a.organization_id = $3",
+            "a.job_posting_id = $4",
+            "p.cv_embedding IS NOT NULL",
+        ]
+        app_param_index = 5
+        app_values = list(values)
+
+        if min_gpa is not None:
+            app_param_index += 1
+            app_where.append(f"p.gpa >= ${app_param_index}")
+            app_values.append(min_gpa)
+        if class_year is not None:
+            app_param_index += 1
+            app_where.append(f"p.current_class = ${app_param_index}")
+            app_values.append(class_year)
+        if min_experience_years is not None:
+            app_param_index += 1
+            app_where.append(f"p.experience_years >= ${app_param_index}")
+            app_values.append(min_experience_years)
+
+        fts_rank_expr_p = (
+            "CASE WHEN p.fts IS NOT NULL THEN ts_rank_cd(p.fts, plainto_tsquery('english', $5)) "
+            "ELSE 0.0 END"
+        )
+        app_sql = f"""
+            SELECT p.candidate_id AS id, u.full_name, p.university, p.gpa, p.current_class,
+                   p.experience_years, p.skills, p.raw_cv_text, p.source_path,
+                   (1 - (p.cv_embedding <=> $1::vector)) AS vector_similarity,
+                   {fts_rank_expr_p} AS bm25_rank,
+                   (
+                       (1 - (p.cv_embedding <=> $1::vector)) * 0.7 + 
+                       ({fts_rank_expr_p}) * 0.3
+                   ) AS similarity
+            FROM job_applications a
+            JOIN candidate_profiles p ON p.candidate_id = a.candidate_id
+            JOIN candidate_users u ON u.id = a.candidate_id
+            WHERE {" AND ".join(app_where)}
+            ORDER BY similarity DESC
+            LIMIT $2
+        """
+
+        try:
+            async with self._pool.acquire() as connection:
+                rows = await connection.fetch(app_sql, *app_values)
+                if rows:
+                    return [dict(row) for row in rows]
+        except Exception:
+            pass
+
+        # 2. Secondary Query: Fallback to Legacy candidates table
+        fts_rank_expr = (
+            "CASE WHEN fts IS NOT NULL THEN ts_rank_cd(fts, plainto_tsquery('english', $5)) "
+            "ELSE 0.0 END"
+        )
+        sql = f"""
+            SELECT id, full_name, university, gpa, current_class, experience_years,
+                   skills, raw_cv_text, source_path,
+                   (1 - (cv_embedding <=> $1::vector)) AS vector_similarity,
+                   {fts_rank_expr} AS bm25_rank,
+                   (
+                       (1 - (cv_embedding <=> $1::vector)) * 0.7 + 
+                       ({fts_rank_expr}) * 0.3
+                   ) AS similarity
+            FROM candidates
+            WHERE {" AND ".join(where_clauses)}
+            ORDER BY similarity DESC
+            LIMIT $2
+        """
+
+        try:
+            async with self._pool.acquire() as connection:
+                rows = await connection.fetch(sql, *values)
+            return [dict(row) for row in rows]
+        except Exception:
+            return await self.search_candidates(
+                organization_id=organization_id,
+                job_posting_id=job_posting_id,
+                query_embedding=query_embedding,
+                min_gpa=min_gpa,
+                class_year=class_year,
+                min_experience_years=min_experience_years,
+                limit=limit,
+            )
+
     async def save_debate_result(self, result: DebateResult) -> int:
         await self._ensure_connected()
         async with self._pool.acquire() as connection:
@@ -557,6 +738,25 @@ class CandidateRepository:
         async with self._pool.acquire() as connection:
             rows = await connection.fetch(
                 """
+                SELECT p.candidate_id, u.full_name, p.university,
+                       d.final_score, d.arbitrator_rationale, d.is_selected
+                FROM debate_results d
+                JOIN job_applications a ON a.candidate_id = d.candidate_id
+                JOIN candidate_profiles p ON p.candidate_id = a.candidate_id
+                JOIN candidate_users u ON u.id = a.candidate_id
+                WHERE d.organization_id = $1 AND a.job_posting_id = $2
+                ORDER BY d.final_score DESC, d.created_at DESC
+                LIMIT $3
+                """,
+                organization_id,
+                job_posting_id,
+                limit,
+            )
+            if rows:
+                return [dict(row) for row in rows]
+
+            rows = await connection.fetch(
+                """
                 SELECT c.id AS candidate_id, c.full_name, c.university,
                        d.final_score, d.arbitrator_rationale, d.is_selected
                 FROM debate_results d
@@ -570,6 +770,251 @@ class CandidateRepository:
                 limit,
             )
         return [dict(row) for row in rows]
+
+    async def create_candidate_user(
+        self,
+        *,
+        email: str,
+        password: str,
+        full_name: str,
+        credential_pepper: str = "",
+        is_guest: bool = False,
+    ) -> dict[str, Any]:
+        await self._ensure_connected()
+        email_clean = email.strip().lower()
+        password_hash = hash_secret(password, pepper=credential_pepper)
+        async with self._pool.acquire() as connection:
+            row = await connection.fetchrow(
+                """
+                INSERT INTO candidate_users (email, password_hash, full_name, is_guest)
+                VALUES ($1, $2, $3, $4)
+                RETURNING id, email, full_name, is_guest, created_at
+                """,
+                email_clean,
+                password_hash,
+                full_name,
+                is_guest,
+            )
+        return dict(row)
+
+    async def authenticate_candidate_user(
+        self,
+        *,
+        email: str,
+        password: str,
+        credential_pepper: str = "",
+    ) -> dict[str, Any] | None:
+        await self._ensure_connected()
+        email_clean = email.strip().lower()
+        async with self._pool.acquire() as connection:
+            row = await connection.fetchrow(
+                """
+                SELECT id, email, password_hash, full_name, is_guest, created_at
+                FROM candidate_users
+                WHERE email = $1
+                """,
+                email_clean,
+            )
+            if row is None:
+                return None
+            if not verify_secret(password, row["password_hash"], pepper=credential_pepper):
+                return None
+
+        data = dict(row)
+        data.pop("password_hash", None)
+        return data
+
+    async def get_candidate_user(self, candidate_id: int) -> dict[str, Any] | None:
+        await self._ensure_connected()
+        async with self._pool.acquire() as connection:
+            row = await connection.fetchrow(
+                """
+                SELECT id, email, full_name, is_guest, created_at
+                FROM candidate_users
+                WHERE id = $1
+                """,
+                candidate_id,
+            )
+        return None if row is None else dict(row)
+
+    async def save_candidate_profile(
+        self,
+        *,
+        candidate_id: int,
+        university: str | None = None,
+        gpa: float | None = None,
+        current_class: int = 5,
+        experience_years: int = 0,
+        skills: list[str] | None = None,
+        raw_cv_text: str = "",
+        cv_embedding: list[float] | None = None,
+        source_path: str | None = None,
+    ) -> dict[str, Any]:
+        await self._ensure_connected()
+        skills = skills or []
+        embedding_pg = to_pgvector(cv_embedding) if cv_embedding else None
+
+        async with self._pool.acquire() as connection:
+            row = await connection.fetchrow(
+                """
+                INSERT INTO candidate_profiles (
+                    candidate_id, university, gpa, current_class,
+                    experience_years, skills, raw_cv_text, cv_embedding, source_path, updated_at
+                )
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8::vector, $9, CURRENT_TIMESTAMP)
+                ON CONFLICT (candidate_id) DO UPDATE SET
+                    university = EXCLUDED.university,
+                    gpa = EXCLUDED.gpa,
+                    current_class = EXCLUDED.current_class,
+                    experience_years = EXCLUDED.experience_years,
+                    skills = EXCLUDED.skills,
+                    raw_cv_text = EXCLUDED.raw_cv_text,
+                    cv_embedding = COALESCE(
+                        EXCLUDED.cv_embedding, candidate_profiles.cv_embedding
+                    ),
+                    source_path = EXCLUDED.source_path,
+                    updated_at = CURRENT_TIMESTAMP
+                RETURNING candidate_id, university, gpa, current_class,
+                          experience_years, skills, updated_at
+                """,
+                candidate_id,
+                university,
+                gpa,
+                current_class,
+                experience_years,
+                skills,
+                raw_cv_text,
+                embedding_pg,
+                source_path,
+            )
+        return dict(row)
+
+    async def get_candidate_profile(self, candidate_id: int) -> dict[str, Any] | None:
+        await self._ensure_connected()
+        async with self._pool.acquire() as connection:
+            row = await connection.fetchrow(
+                """
+                SELECT p.candidate_id, u.full_name, u.email, p.university, p.gpa,
+                       p.current_class, p.experience_years, p.skills, p.raw_cv_text,
+                       p.source_path, p.updated_at,
+                       (p.cv_embedding IS NOT NULL) AS has_embedding
+                FROM candidate_users u
+                LEFT JOIN candidate_profiles p ON p.candidate_id = u.id
+                WHERE u.id = $1
+                """,
+                candidate_id,
+            )
+        return None if row is None else dict(row)
+
+    async def create_job_application(
+        self,
+        *,
+        job_posting_id: int,
+        candidate_id: int,
+        organization_id: int,
+    ) -> dict[str, Any]:
+        await self._ensure_connected()
+        async with self._pool.acquire() as connection:
+            row = await connection.fetchrow(
+                """
+                INSERT INTO job_applications (job_posting_id, candidate_id, organization_id)
+                VALUES ($1, $2, $3)
+                ON CONFLICT (job_posting_id, candidate_id)
+                DO UPDATE SET status = job_applications.status
+                RETURNING id, job_posting_id, candidate_id, organization_id, status, applied_at
+                """,
+                job_posting_id,
+                candidate_id,
+                organization_id,
+            )
+        return dict(row)
+
+    async def list_open_job_postings(self) -> list[dict[str, Any]]:
+        await self._ensure_connected()
+        async with self._pool.acquire() as connection:
+            rows = await connection.fetch(
+                """
+                SELECT j.id, j.organization_id, o.display_name AS organization_name,
+                       j.title, j.description, j.deadline_at, j.created_at
+                FROM job_postings j
+                JOIN organizations o ON o.id = j.organization_id
+                WHERE j.is_active = TRUE AND o.is_active = TRUE
+                ORDER BY j.created_at DESC
+                """
+            )
+        return [dict(row) for row in rows]
+
+    async def list_candidate_applications(self, candidate_id: int) -> list[dict[str, Any]]:
+        await self._ensure_connected()
+        async with self._pool.acquire() as connection:
+            rows = await connection.fetch(
+                """
+                SELECT a.id AS application_id, a.job_posting_id, j.title AS job_title,
+                       o.display_name AS organization_name, a.status, a.applied_at
+                FROM job_applications a
+                JOIN job_postings j ON j.id = a.job_posting_id
+                JOIN organizations o ON o.id = a.organization_id
+                WHERE a.candidate_id = $1
+                ORDER BY a.applied_at DESC
+                """,
+                candidate_id,
+            )
+        return [dict(row) for row in rows]
+
+    async def withdraw_job_application(self, job_posting_id: int, candidate_id: int) -> bool:
+        await self._ensure_connected()
+        async with self._pool.acquire() as connection:
+            result = await connection.execute(
+                """
+                DELETE FROM job_applications
+                WHERE job_posting_id = $1 AND candidate_id = $2
+                """,
+                job_posting_id,
+                candidate_id,
+            )
+            return "DELETE 1" in result
+
+    async def delete_candidate_profile(self, candidate_id: int) -> bool:
+        await self._ensure_connected()
+        async with self._pool.acquire() as connection:
+            result = await connection.execute(
+                """
+                DELETE FROM candidate_profiles
+                WHERE candidate_id = $1
+                """,
+                candidate_id,
+            )
+            return "DELETE 1" in result
+
+    async def delete_job_posting(self, job_posting_id: int, organization_id: int) -> bool:
+        await self._ensure_connected()
+        async with self._pool.acquire() as connection:
+            result = await connection.execute(
+                """
+                DELETE FROM job_postings
+                WHERE id = $1 AND organization_id = $2
+                """,
+                job_posting_id,
+                organization_id,
+            )
+            return "DELETE 1" in result
+
+    async def toggle_job_posting_status(
+        self, job_posting_id: int, organization_id: int, is_active: bool
+    ) -> bool:
+        await self._ensure_connected()
+        async with self._pool.acquire() as connection:
+            result = await connection.execute(
+                """
+                UPDATE job_postings
+                SET is_active = $3
+                WHERE id = $1 AND organization_id = $2
+                """,
+                job_posting_id,
+                organization_id,
+                is_active,
+            )
+            return "UPDATE 1" in result
 
     async def _ensure_connected(self) -> None:
         if self._pool is None:

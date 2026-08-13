@@ -170,18 +170,46 @@ async def list_postings(session: dict[str, Any] = ORG_SESSION_DEPENDENCY) -> dic
     return {"postings": rows}
 
 
-@router.get("/postings/{posting_id}")
-async def get_posting(
+@router.delete("/postings/{posting_id}")
+async def delete_posting(
     posting_id: int,
     session: dict[str, Any] = ORG_SESSION_DEPENDENCY,
 ) -> dict[str, Any]:
     settings = get_settings()
+    organization_id = session["organization_id"]
     try:
         async with CandidateRepository(settings.database_url) as repository:
-            posting = await _get_posting_or_404(repository, posting_id, session["organization_id"])
+            await _get_posting_or_404(repository, posting_id, organization_id)
+            await repository.delete_job_posting(posting_id, organization_id)
+            return {"status": "ok", "message": "Job posting deleted successfully."}
     except (OSError, TimeoutError, ValueError, asyncpg.PostgresError) as exc:
         raise HTTPException(status_code=503, detail=DATABASE_ERROR_MESSAGE) from exc
-    return {"posting": posting}
+
+
+class TogglePostingStatusRequest(BaseModel):
+    is_active: bool
+
+
+@router.patch("/postings/{posting_id}/status")
+async def toggle_posting_status(
+    posting_id: int,
+    payload: TogglePostingStatusRequest,
+    session: dict[str, Any] = ORG_SESSION_DEPENDENCY,
+) -> dict[str, Any]:
+    settings = get_settings()
+    organization_id = session["organization_id"]
+    try:
+        async with CandidateRepository(settings.database_url) as repository:
+            await _get_posting_or_404(repository, posting_id, organization_id)
+            await repository.toggle_job_posting_status(
+                posting_id, organization_id, payload.is_active
+            )
+            return {
+                "status": "ok",
+                "message": f"Job posting is now {'active' if payload.is_active else 'inactive'}.",
+            }
+    except (OSError, TimeoutError, ValueError, asyncpg.PostgresError) as exc:
+        raise HTTPException(status_code=503, detail=DATABASE_ERROR_MESSAGE) from exc
 
 
 @router.get("/postings/{posting_id}/candidates")

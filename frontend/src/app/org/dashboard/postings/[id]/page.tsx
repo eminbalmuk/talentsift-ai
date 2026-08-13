@@ -268,38 +268,57 @@ export default function PostingDetailPage() {
                   <TableHead>GANO</TableHead>
                   <TableHead className="hidden md:table-cell">Sınıf</TableHead>
                   <TableHead className="hidden md:table-cell">Deneyim</TableHead>
-                  {semantic ? <TableHead>Benzerlik</TableHead> : null}
+                  {semantic ? (
+                    <>
+                      <TableHead>Pre-LLM Puanı</TableHead>
+                      <TableHead className="hidden lg:table-cell">İlan Uyumu</TableHead>
+                      <TableHead className="hidden lg:table-cell">Donanım</TableHead>
+                    </>
+                  ) : null}
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {candidates?.map((candidate) => (
-                  <TableRow key={candidate.id}>
-                    <TableCell className="font-medium">
-                      <Link
-                        href={`/org/dashboard/postings/${postingId}/candidates/${candidate.id}`}
-                        className="hover:underline"
-                      >
-                        {candidate.full_name}
-                      </Link>
-                    </TableCell>
-                    <TableCell className="hidden text-muted-foreground sm:table-cell">
-                      {candidate.university ?? "—"}
-                    </TableCell>
-                    <TableCell>{candidate.gpa ?? "—"}</TableCell>
-                    <TableCell className="hidden md:table-cell">
-                      {candidate.current_class === 5 ? "Mezun" : candidate.current_class}
-                    </TableCell>
-                    <TableCell className="hidden md:table-cell">
-                      {candidate.experience_years} yıl
-                    </TableCell>
-                    {semantic ? (
-                      <TableCell>{(candidate as RankedCandidate).similarity.toFixed(3)}</TableCell>
-                    ) : null}
-                  </TableRow>
-                ))}
+                {candidates?.map((candidate) => {
+                  const ranked = candidate as RankedCandidate;
+                  return (
+                    <TableRow key={candidate.id}>
+                      <TableCell className="font-medium">
+                        <Link
+                          href={`/org/dashboard/postings/${postingId}/candidates/${candidate.id}`}
+                          className="hover:underline"
+                        >
+                          {candidate.full_name}
+                        </Link>
+                      </TableCell>
+                      <TableCell className="hidden text-muted-foreground sm:table-cell">
+                        {candidate.university ?? "—"}
+                      </TableCell>
+                      <TableCell>{candidate.gpa ?? "—"}</TableCell>
+                      <TableCell className="hidden md:table-cell">
+                        {candidate.current_class === 5 ? "Mezun" : candidate.current_class}
+                      </TableCell>
+                      <TableCell className="hidden md:table-cell">
+                        {candidate.experience_years} yıl
+                      </TableCell>
+                      {semantic ? (
+                        <>
+                          <TableCell className="font-semibold text-primary">
+                            {(ranked.pre_llm_score ?? ranked.similarity).toFixed(3)}
+                          </TableCell>
+                          <TableCell className="hidden text-muted-foreground lg:table-cell">
+                            {(ranked.relevance_score ?? ranked.similarity).toFixed(3)}
+                          </TableCell>
+                          <TableCell className="hidden text-muted-foreground lg:table-cell">
+                            {(ranked.competency_score ?? 0).toFixed(3)}
+                          </TableCell>
+                        </>
+                      ) : null}
+                    </TableRow>
+                  );
+                })}
                 {candidates?.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={semantic ? 6 : 5} className="py-10 text-center text-sm text-muted-foreground">
+                    <TableCell colSpan={semantic ? 8 : 5} className="py-10 text-center text-sm text-muted-foreground">
                       Henüz CV yüklenmedi veya kriterlere uyan aday yok.
                     </TableCell>
                   </TableRow>
