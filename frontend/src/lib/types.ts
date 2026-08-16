@@ -81,18 +81,18 @@ export interface CandidateUser {
 }
 
 export interface CandidateProfile {
-  candidate_id: number;
+  candidate_id: number | null;
   full_name: string;
   email: string;
   university: string | null;
   gpa: number | null;
-  current_class: number;
-  experience_years: number;
-  skills: string[];
-  raw_cv_text: string;
+  current_class: number | null;
+  experience_years: number | null;
+  skills: string[] | null;
+  raw_cv_text: string | null;
   source_path: string | null;
   has_embedding: boolean;
-  updated_at: string;
+  updated_at: string | null;
 }
 
 export interface OpenJobPosting {

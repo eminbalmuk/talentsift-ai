@@ -395,16 +395,24 @@ export default function CandidateDashboardPage() {
                       </div>
                       <div className="flex justify-between border-b border-border/40 pb-2">
                         <span className="text-muted-foreground">Deneyim Süresi:</span>
-                        <span className="font-semibold text-foreground">{profile.experience_years} Yıl</span>
+                        <span className="font-semibold text-foreground">
+                          {profile.experience_years != null ? `${profile.experience_years} Yıl` : "Belirtilmedi"}
+                        </span>
                       </div>
                       <div className="flex justify-between border-b border-border/40 pb-2">
                         <span className="text-muted-foreground">Sınıf / Durum:</span>
-                        <span className="font-semibold text-foreground">{profile.current_class >= 5 ? "Mezun" : `${profile.current_class}. Sınıf`}</span>
+                        <span className="font-semibold text-foreground">
+                          {profile.current_class == null
+                            ? "Belirtilmedi"
+                            : profile.current_class >= 5
+                              ? "Mezun"
+                              : `${profile.current_class}. Sınıf`}
+                        </span>
                       </div>
                       <div className="pt-1">
                         <span className="text-muted-foreground block mb-2 font-medium">Öne Çıkan Yetenekler:</span>
                         <div className="flex flex-wrap gap-1.5">
-                          {profile.skills.length > 0 ? (
+                          {profile.skills && profile.skills.length > 0 ? (
                             profile.skills.map((skill) => (
                               <Badge key={skill} variant="secondary" className="text-[11px]">
                                 {skill}
