@@ -36,7 +36,7 @@ function SidebarContent({
   return (
     <div className="flex h-full flex-col bg-[#0c1c34] px-3 py-5 text-sky-100">
       <div className="mb-6 flex items-center gap-2.5 px-2">
-        <LogoFull height={28} className="shrink-0" />
+        <LogoFull height={32} invert className="shrink-0" />
       </div>
 
       <nav className="flex flex-1 flex-col gap-0.5">

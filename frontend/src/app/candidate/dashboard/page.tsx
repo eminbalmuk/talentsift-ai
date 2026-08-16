@@ -216,17 +216,25 @@ export default function CandidateDashboardPage() {
         {/* Tabs Container */}
         <Tabs defaultValue="jobs" className="w-full space-y-6">
           <TabsList className="grid w-full grid-cols-3 max-w-lg mx-auto sm:mx-0">
-            <TabsTrigger value="jobs" className="gap-1.5 text-xs sm:text-sm">
-              <Briefcase className="h-3.5 w-3.5" />
-              İlanlar ({jobs.length})
+            <TabsTrigger value="jobs" className="gap-1.5 truncate px-1 text-xs sm:text-sm">
+              <Briefcase className="h-3.5 w-3.5 shrink-0" />
+              <span className="truncate">
+                İlanlar<span className="hidden sm:inline"> ({jobs.length})</span>
+              </span>
             </TabsTrigger>
-            <TabsTrigger value="profile" className="gap-1.5 text-xs sm:text-sm">
-              <FileText className="h-3.5 w-3.5" />
-              Profil & CV
+            <TabsTrigger value="profile" className="gap-1.5 truncate px-1 text-xs sm:text-sm">
+              <FileText className="h-3.5 w-3.5 shrink-0" />
+              <span className="truncate">
+                <span className="sm:hidden">Profil</span>
+                <span className="hidden sm:inline">Profil & CV</span>
+              </span>
             </TabsTrigger>
-            <TabsTrigger value="applications" className="gap-1.5 text-xs sm:text-sm">
-              <Send className="h-3.5 w-3.5" />
-              Başvurularım ({applications.length})
+            <TabsTrigger value="applications" className="gap-1.5 truncate px-1 text-xs sm:text-sm">
+              <Send className="h-3.5 w-3.5 shrink-0" />
+              <span className="truncate">
+                <span className="sm:hidden">Başvurular</span>
+                <span className="hidden sm:inline">Başvurularım ({applications.length})</span>
+              </span>
             </TabsTrigger>
           </TabsList>
 
