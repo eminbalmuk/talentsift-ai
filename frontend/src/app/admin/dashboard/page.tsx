@@ -34,7 +34,7 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { LicenseStatusBadge } from "@/components/status-badge";
 import { StatCard } from "@/components/stat-card";
-import { apiGet, apiPatch, apiPost, ApiError } from "@/lib/api";
+import { apiDelete, apiGet, apiPatch, apiPost, ApiError } from "@/lib/api";
 import type { Organization, OrganizationCredential } from "@/lib/types";
 
 type RowEdit = { license_status: string; is_active: boolean; license_expires_at: string };
@@ -49,6 +49,7 @@ export default function AdminOrganizationsPage() {
   const [edits, setEdits] = useState<Record<number, RowEdit>>({});
   const [savingId, setSavingId] = useState<number | null>(null);
   const [rotatingId, setRotatingId] = useState<number | null>(null);
+  const [deletingId, setDeletingId] = useState<number | null>(null);
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [displayName, setDisplayName] = useState("");
@@ -149,6 +150,26 @@ export default function AdminOrganizationsPage() {
       toast.error(error instanceof ApiError ? error.message : "Anahtar döndürülemedi.");
     } finally {
       setRotatingId(null);
+    }
+  }
+
+  async function handleDelete(organizationId: number, displayName: string) {
+    if (
+      !confirm(
+        `"${displayName}" organizasyonunu kalıcı olarak silmek istediğinizden emin misiniz? Tüm ilanları, başvuruları ve değerlendirmeleri de silinecek. Bu işlem geri alınamaz.`,
+      )
+    ) {
+      return;
+    }
+    setDeletingId(organizationId);
+    try {
+      await apiDelete(`/api/admin/organizations/${organizationId}`);
+      toast.success(`"${displayName}" organizasyonu silindi.`);
+      await load();
+    } catch (error) {
+      toast.error(error instanceof ApiError ? error.message : "Organizasyon silinemedi.");
+    } finally {
+      setDeletingId(null);
     }
   }
 
@@ -354,6 +375,15 @@ export default function AdminOrganizationsPage() {
                         onClick={() => handleRotate(org.id)}
                       >
                         Anahtarı yenile
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+                        disabled={deletingId === org.id}
+                        onClick={() => handleDelete(org.id, org.display_name)}
+                      >
+                        {deletingId === org.id ? "Siliniyor..." : "Sil"}
                       </Button>
                     </div>
                   </TableCell>

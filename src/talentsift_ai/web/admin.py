@@ -181,6 +181,22 @@ async def approve_organization(
     }
 
 
+@router.delete("/organizations/{organization_id}")
+async def delete_organization(
+    organization_id: int,
+    _: dict[str, Any] = ADMIN_SESSION_DEPENDENCY,
+) -> dict[str, Any]:
+    settings = get_settings()
+    try:
+        async with CandidateRepository(settings.database_url) as repository:
+            deleted = await repository.delete_organization(organization_id)
+    except (OSError, TimeoutError, ValueError, asyncpg.PostgresError) as exc:
+        raise HTTPException(status_code=503, detail=DATABASE_ERROR_MESSAGE) from exc
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Organization not found.")
+    return {"status": "ok", "message": "Organizasyon ve tüm verileri kalıcı olarak silindi."}
+
+
 @router.post("/organizations/{organization_id}/license/rotate")
 async def rotate_organization_license(
     organization_id: int,

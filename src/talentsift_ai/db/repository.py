@@ -379,6 +379,19 @@ class CandidateRepository:
             return None
         return {**dict(row), "license_key": license_key}
 
+    async def delete_organization(self, organization_id: int) -> bool:
+        """Deletes an organization and everything it owns (users, postings, applications,
+        legacy candidates, debate results -- all ON DELETE CASCADE). Candidate portal
+        identities (candidate_users/candidate_profiles) are not org-owned and are left
+        untouched; only their application/link rows to this organization are removed.
+        """
+        await self._ensure_connected()
+        async with self._pool.acquire() as connection:
+            result = await connection.execute(
+                "DELETE FROM organizations WHERE id = $1", organization_id
+            )
+        return result == "DELETE 1"
+
     async def create_job_posting(self, posting: JobPostingCreate) -> JobPosting:
         await self._ensure_connected()
         async with self._pool.acquire() as connection:
