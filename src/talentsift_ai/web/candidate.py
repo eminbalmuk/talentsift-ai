@@ -273,12 +273,22 @@ async def delete_cv(
     session: dict[str, Any] = CANDIDATE_SESSION_DEPENDENCY,
 ) -> dict[str, Any]:
     """
-    Deletes candidate's uploaded CV profile.
+    Deletes candidate's uploaded CV profile. Blocked while an active job application
+    exists (that application's evaluation depends on this CV) -- uploading a
+    replacement CV is still always allowed and simply overwrites the profile.
     """
     candidate_id = session["candidate_id"]
 
     try:
         async with CandidateRepository(pool=get_pool()) as repository:
+            if await repository.has_active_application(candidate_id):
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        "Aktif bir ilan başvurunuz olduğu için CV'nizi silemezsiniz. "
+                        "Güncellemek için yeni bir CV yükleyebilirsiniz."
+                    ),
+                )
             await repository.delete_candidate_profile(candidate_id)
             return {"status": "ok", "message": "CV profile deleted successfully."}
     except (OSError, TimeoutError, ValueError, asyncpg.PostgresError) as exc:

@@ -1108,6 +1108,17 @@ class CandidateRepository:
             )
             return "DELETE 1" in result
 
+    async def has_active_application(self, candidate_id: int) -> bool:
+        """job_applications rows are deleted outright on withdraw, so any row here
+        is an active application (never a stale 'withdrawn' status to filter out)."""
+        await self._ensure_connected()
+        async with self._pool.acquire() as connection:
+            row = await connection.fetchval(
+                "SELECT 1 FROM job_applications WHERE candidate_id = $1 LIMIT 1",
+                candidate_id,
+            )
+        return row is not None
+
     async def delete_candidate_profile(self, candidate_id: int) -> bool:
         await self._ensure_connected()
         async with self._pool.acquire() as connection:
