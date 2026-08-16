@@ -645,7 +645,15 @@ class CandidateRepository:
         """
 
         async with self._pool.acquire() as connection:
-            rows = await connection.fetch(sql, *values)
+            async with connection.transaction():
+                # ivfflat index is built with lists=100; default probes=1 only scans
+                # 1/100 of the clusters and can silently miss true matches at our
+                # current data volume. probes=100 scans every cluster (exact recall,
+                # negligible cost at this row count). Supabase free tier's 32MB
+                # maintenance_work_mem cap blocks rebuilding the index with a lower
+                # lists value, so this is tuned at query time instead.
+                await connection.execute("SET LOCAL ivfflat.probes = 100")
+                rows = await connection.fetch(sql, *values)
         return [dict(row) for row in rows]
 
     async def hybrid_search_candidates(
@@ -733,7 +741,9 @@ class CandidateRepository:
 
         try:
             async with self._pool.acquire() as connection:
-                rows = await connection.fetch(app_sql, *app_values)
+                async with connection.transaction():
+                    await connection.execute("SET LOCAL ivfflat.probes = 100")
+                    rows = await connection.fetch(app_sql, *app_values)
                 if rows:
                     return [dict(row) for row in rows]
         except Exception:
@@ -761,7 +771,9 @@ class CandidateRepository:
 
         try:
             async with self._pool.acquire() as connection:
-                rows = await connection.fetch(sql, *values)
+                async with connection.transaction():
+                    await connection.execute("SET LOCAL ivfflat.probes = 100")
+                    rows = await connection.fetch(sql, *values)
             return [dict(row) for row in rows]
         except Exception:
             return await self.search_candidates(
