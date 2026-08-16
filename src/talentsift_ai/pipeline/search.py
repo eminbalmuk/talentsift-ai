@@ -47,9 +47,8 @@ class HybridSearchService:
             limit=candidate_pool_limit,
         )
 
-        # 3. Apply Pre-LLM Reranking (FlashRank Cross-Encoder + Competency Score)
+        # 3. Apply Pre-LLM Reranking (hybrid relevance score + competency score)
         reranked = self._reranker.rerank(
-            query=job_description,
             candidates=candidates,
             top_k=limit,
             relevance_weight=relevance_weight,

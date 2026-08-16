@@ -441,7 +441,7 @@ export default function PostingDetailPage() {
               </Button>
             </div>
             <p className="mt-2 text-xs text-muted-foreground">
-              Ön eleme (embedding + BM25 + FlashRank) sıralamasından en iyi N aday seçilir; ilan
+              Ön eleme (embedding + BM25 + donanım puanı) sıralamasından en iyi N aday seçilir; ilan
               ile alakası düşük adaylar N&apos;e ulaşmak için dahil edilmez. Seçilen adaylar için
               Optimist/Pessimist/Arbitrator analizi arka planda çalışır, sonuçlar tamamlandıkça
               aşağıdaki tabloya düşer.

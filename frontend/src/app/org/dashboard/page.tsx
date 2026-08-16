@@ -123,7 +123,7 @@ export default function PostingsPage() {
         <div>
           <h1 className="text-xl font-bold tracking-tight text-foreground">İş İlanları & Aday Eleme</h1>
           <p className="text-sm text-muted-foreground">
-            Aday portali başvuruları ve Pre-LLM Reranking (Cross-Encoder + Donanım Puanlama) paneli.
+            Aday portalı başvuruları ve Pre-LLM Reranking (Embedding + BM25 + Donanım Puanlama) paneli.
           </p>
         </div>
         <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
@@ -135,7 +135,7 @@ export default function PostingsPage() {
             <DialogHeader>
               <DialogTitle>Yeni İş İlanı Aç</DialogTitle>
               <DialogDescription>
-                İş tanımı, BGE Cross-Encoder ve LangGraph multi-agent düellosunda adayın ilana uygunluğunu ölçmek için kullanılır.
+                İş tanımı, semantik arama sıralamasında ve LangGraph multi-agent düellosunda adayın ilana uygunluğunu ölçmek için kullanılır.
               </DialogDescription>
             </DialogHeader>
             <form onSubmit={handleCreate} className="flex flex-col gap-4">

@@ -54,7 +54,6 @@ def test_pre_llm_reranker_sorting():
 
     reranker = PreLLMReranker()
     reranked = reranker.rerank(
-        query="Python AI Engineer",
         candidates=candidates,
         top_k=2,
     )

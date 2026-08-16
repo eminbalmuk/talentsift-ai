@@ -503,7 +503,7 @@ async def create_shortlist(
     session: dict[str, Any] = ORG_SESSION_DEPENDENCY,
 ) -> dict[str, Any]:
     """
-    Ranks applicants with the Pre-LLM stage (embedding + BM25 + FlashRank), keeps up to
+    Ranks applicants with the Pre-LLM stage (embedding + BM25 + competency score), keeps up to
     candidate_count of them (fewer if relevance drops off sharply), and queues the
     Optimist/Pessimist/Arbitrator debate for each in the background. Progress shows up
     incrementally on GET /postings/{posting_id}/rankings/top as each debate finishes.
