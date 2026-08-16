@@ -357,8 +357,8 @@ async def upload_candidates(
                 for upload in files:
                     filename = upload.filename or "resume.pdf"
                     try:
-                        pdf_bytes = await upload.read()
-                        candidate = await pipeline.ingest_bytes(pdf_bytes, source_path=filename)
+                        document_bytes = await upload.read()
+                        candidate = await pipeline.ingest_bytes(document_bytes, filename=filename)
                         created.append(
                             {
                                 "id": candidate.id,

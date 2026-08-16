@@ -19,6 +19,7 @@ DATABASE_ERROR_MESSAGE = (
 
 router = APIRouter(prefix="/api/candidate", tags=["candidate"])
 CANDIDATE_FILE_DEPENDENCY = File(...)
+SUPPORTED_CV_EXTENSIONS = (".pdf", ".docx")
 
 
 class CandidateRegisterRequest(BaseModel):
@@ -152,16 +153,17 @@ async def upload_cv(
     session: dict[str, Any] = CANDIDATE_SESSION_DEPENDENCY,
 ) -> dict[str, Any]:
     """
-    Parses uploaded PDF CV once via Mistral OCR & Ministral-3B, generates embedding ONCE,
+    Parses uploaded PDF/Word CV once via Mistral OCR & Ministral-3B, generates embedding ONCE,
     and updates the candidate's master profile.
     """
     settings = get_settings()
     candidate_id = session["candidate_id"]
 
-    if not file.filename or not file.filename.lower().endswith(".pdf"):
-        raise HTTPException(status_code=400, detail="Only PDF files are supported.")
+    suffix = Path(file.filename).suffix.lower() if file.filename else ""
+    if suffix not in SUPPORTED_CV_EXTENSIONS:
+        raise HTTPException(status_code=400, detail="Only PDF or Word (.docx) files are supported.")
 
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
         content = await file.read()
         tmp.write(content)
         tmp_path = Path(tmp.name)
@@ -170,7 +172,7 @@ async def upload_cv(
         async with _create_mistral_client() as mistral:
             async with CandidateRepository(settings.database_url) as repository:
                 pipeline = ResumeIngestionPipeline(mistral_client=mistral, repository=repository)
-                extracted = await pipeline.process_pdf(tmp_path)
+                extracted = await pipeline.process_document(tmp_path)
 
                 profile = await repository.save_candidate_profile(
                     candidate_id=candidate_id,

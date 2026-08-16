@@ -200,10 +200,10 @@ def create_posting(
 def ingest(
     organization_id: Annotated[int, typer.Option(help="Organization ID owner of the resumes.")],
     job_posting_id: Annotated[int, typer.Option(help="Job posting ID the resumes belong to.")],
-    resume_dir: Annotated[Path, typer.Option(help="Directory containing PDF resumes.")],
+    resume_dir: Annotated[Path, typer.Option(help="Directory with PDF/Word (.docx) resumes.")],
     concurrency: Annotated[int, typer.Option(help="Maximum concurrent resume jobs.")] = 8,
 ) -> None:
-    """OCR, extract, embed, and store all PDF resumes in a directory."""
+    """OCR, extract, embed, and store all PDF/Word resumes in a directory."""
 
     async def _ingest() -> None:
         settings = get_settings()

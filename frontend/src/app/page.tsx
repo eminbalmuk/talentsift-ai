@@ -63,7 +63,7 @@ export default function HomePage() {
       <AuroraBackground />
       <header className="mx-auto flex w-full max-w-6xl items-center justify-between px-6 py-6">
         <div className="flex items-center gap-2">
-          <LogoFull height={36} />
+          <LogoFull height={44} />
         </div>
         <div className="flex items-center gap-2">
           <Link

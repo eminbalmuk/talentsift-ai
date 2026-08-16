@@ -14,9 +14,22 @@ from talentsift_ai.models import MistralModel
 MAX_RATE_LIMIT_RETRIES = 4
 RETRY_BASE_DELAY_SECONDS = 1.0
 
+SUPPORTED_DOCUMENT_MIME_TYPES = {
+    ".pdf": "application/pdf",
+    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+}
+
 
 class MistralClientError(RuntimeError):
     """Raised when the Mistral API returns an error or unexpected payload."""
+
+
+def resolve_document_mime_type(filename: str) -> str:
+    suffix = Path(filename).suffix.lower()
+    mime_type = SUPPORTED_DOCUMENT_MIME_TYPES.get(suffix)
+    if mime_type is None:
+        raise MistralClientError(f"Unsupported resume file type: {suffix or filename!r}")
+    return mime_type
 
 
 class MistralClient:
@@ -45,15 +58,21 @@ class MistralClient:
     async def __aexit__(self, *_: object) -> None:
         await self.close()
 
-    async def ocr_pdf(self, pdf_path: Path, model: str = MistralModel.OCR) -> str:
-        return await self.ocr_pdf_bytes(pdf_path.read_bytes(), model=model)
+    async def ocr_document(self, document_path: Path, model: str = MistralModel.OCR) -> str:
+        return await self.ocr_document_bytes(
+            document_path.read_bytes(),
+            mime_type=resolve_document_mime_type(document_path.name),
+            model=model,
+        )
 
-    async def ocr_pdf_bytes(self, pdf_bytes: bytes, model: str = MistralModel.OCR) -> str:
+    async def ocr_document_bytes(
+        self, document_bytes: bytes, *, mime_type: str, model: str = MistralModel.OCR
+    ) -> str:
         payload = {
             "model": model,
             "document": {
                 "type": "document_url",
-                "document_url": self._pdf_data_url(pdf_bytes),
+                "document_url": self._document_data_url(document_bytes, mime_type),
             },
         }
         response = await self._post("/ocr", payload)
@@ -125,9 +144,9 @@ class MistralClient:
         return response.json()
 
     @staticmethod
-    def _pdf_data_url(pdf_bytes: bytes) -> str:
-        encoded = base64.b64encode(pdf_bytes).decode("ascii")
-        return f"data:application/pdf;base64,{encoded}"
+    def _document_data_url(document_bytes: bytes, mime_type: str) -> str:
+        encoded = base64.b64encode(document_bytes).decode("ascii")
+        return f"data:{mime_type};base64,{encoded}"
 
     @staticmethod
     def _extract_markdown(response: dict[str, Any]) -> str:

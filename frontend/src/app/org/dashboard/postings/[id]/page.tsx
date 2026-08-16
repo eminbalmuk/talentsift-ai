@@ -191,14 +191,14 @@ export default function PostingDetailPage() {
           <CardTitle className="text-sm">CV yükle</CardTitle>
         </CardHeader>
         <CardContent className="flex flex-col gap-3">
-          <Input ref={fileInputRef} type="file" accept="application/pdf" multiple />
+          <Input ref={fileInputRef} type="file" accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" multiple />
           <Button onClick={handleUpload} disabled={uploading} className="w-fit gap-1.5">
             <Upload className="h-4 w-4" />
             {uploading ? "Yükleniyor ve işleniyor..." : "Yükle"}
           </Button>
           <p className="text-xs text-muted-foreground">
-            PDF CV&apos;ler OCR ile okunur, yapılandırılır ve embedding&apos;i çıkarılır. Aynı anda
-            en fazla 20 dosya.
+            PDF veya Word (.docx) CV&apos;ler OCR ile okunur, yapılandırılır ve embedding&apos;i
+            çıkarılır. Aynı anda en fazla 20 dosya.
           </p>
         </CardContent>
       </Card>

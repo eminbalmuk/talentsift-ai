@@ -10,11 +10,12 @@ export function LogoMark({
   invert?: boolean;
   className?: string;
 }) {
+  const width = Math.round(size * (229 / 214));
   return (
     <Image
       src="/logo-mark.png"
       alt="TalentSift AI"
-      width={size}
+      width={width}
       height={size}
       priority
       className={cn(invert && "brightness-0 invert", className)}
@@ -31,7 +32,7 @@ export function LogoFull({
   invert?: boolean;
   className?: string;
 }) {
-  const width = Math.round(height * (1774 / 887));
+  const width = Math.round(height * (846 / 468));
   return (
     <Image
       src="/logo-full.png"

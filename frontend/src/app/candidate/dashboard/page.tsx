@@ -63,8 +63,9 @@ export default function CandidateDashboardPage() {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    if (!file.name.toLowerCase().endsWith(".pdf")) {
-      toast.error("Lütfen sadece PDF formatında CV yükleyin.");
+    const lowerName = file.name.toLowerCase();
+    if (!lowerName.endsWith(".pdf") && !lowerName.endsWith(".docx")) {
+      toast.error("Lütfen PDF veya Word (.docx) formatında CV yükleyin.");
       return;
     }
 
@@ -319,19 +320,19 @@ export default function CandidateDashboardPage() {
                     CV Yükleme & Profilleştirme
                   </CardTitle>
                   <CardDescription className="text-xs">
-                    PDF CV'niz yüklendiğinde `mistral-ocr` ve `mistral-embed` ile profilleştirilir. Bu işlem SADECE 1 KERE yapılır.
+                    PDF veya Word CV&apos;niz yüklendiğinde `mistral-ocr` ve `mistral-embed` ile profilleştirilir. Bu işlem SADECE 1 KERE yapılır.
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
                   <div className="relative border-2 border-dashed border-border/80 hover:border-primary/60 rounded-xl p-6 flex flex-col items-center justify-center text-center transition-colors bg-muted/20">
                     <UploadCloud className="h-10 w-10 text-muted-foreground mb-2" />
                     <p className="text-xs font-medium text-foreground mb-1">
-                      {uploading ? "CV İşleniyor (Mistral OCR + Embedding)..." : "PDF CV'nizi Sürükleyin veya Seçin"}
+                      {uploading ? "CV İşleniyor (Mistral OCR + Embedding)..." : "PDF veya Word CV'nizi Sürükleyin veya Seçin"}
                     </p>
-                    <p className="text-[11px] text-muted-foreground mb-3">Maksimum 10MB PDF dosyaları</p>
+                    <p className="text-[11px] text-muted-foreground mb-3">Maksimum 10MB, PDF veya .docx dosyaları</p>
                     <input
                       type="file"
-                      accept=".pdf"
+                      accept=".pdf,.docx"
                       onChange={handleFileUpload}
                       disabled={uploading}
                       className="absolute inset-0 opacity-0 cursor-pointer"
