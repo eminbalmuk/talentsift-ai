@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 
 from talentsift_ai.db.repository import CandidateRepository
 from talentsift_ai.settings import get_settings
+from talentsift_ai.web.db import get_pool
 from talentsift_ai.web.security import create_signed_session, verify_signed_session
 
 SESSION_COOKIE = "talentsift_admin_session"
@@ -57,7 +58,7 @@ async def login(payload: AdminLoginRequest, response: Response) -> dict[str, Any
         raise HTTPException(status_code=500, detail="Admin session secret is not configured.")
 
     try:
-        async with CandidateRepository(settings.database_url) as repository:
+        async with CandidateRepository(pool=get_pool()) as repository:
             identity = await repository.authenticate_admin(
                 username=payload.username,
                 password=payload.password,
@@ -96,9 +97,8 @@ async def me(session: dict[str, Any] = ADMIN_SESSION_DEPENDENCY) -> dict[str, An
 
 @router.get("/organizations")
 async def organizations(_: dict[str, Any] = ADMIN_SESSION_DEPENDENCY) -> dict[str, Any]:
-    settings = get_settings()
     try:
-        async with CandidateRepository(settings.database_url) as repository:
+        async with CandidateRepository(pool=get_pool()) as repository:
             rows = await repository.list_organizations()
     except (OSError, TimeoutError, ValueError, asyncpg.PostgresError) as exc:
         raise HTTPException(status_code=503, detail=DATABASE_ERROR_MESSAGE) from exc
@@ -112,7 +112,7 @@ async def create_organization(
 ) -> dict[str, Any]:
     settings = get_settings()
     try:
-        async with CandidateRepository(settings.database_url) as repository:
+        async with CandidateRepository(pool=get_pool()) as repository:
             credential = await repository.provision_organization_user(
                 display_name=payload.display_name,
                 notes=payload.notes,
@@ -135,9 +135,8 @@ async def update_organization_license(
     payload: OrganizationLicenseUpdateRequest,
     _: dict[str, Any] = ADMIN_SESSION_DEPENDENCY,
 ) -> dict[str, Any]:
-    settings = get_settings()
     try:
-        async with CandidateRepository(settings.database_url) as repository:
+        async with CandidateRepository(pool=get_pool()) as repository:
             updated = await repository.update_organization_license(
                 organization_id=organization_id,
                 license_status=payload.license_status,
@@ -159,7 +158,7 @@ async def approve_organization(
 ) -> dict[str, Any]:
     settings = get_settings()
     try:
-        async with CandidateRepository(settings.database_url) as repository:
+        async with CandidateRepository(pool=get_pool()) as repository:
             updated = await repository.update_organization_license(
                 organization_id=organization_id,
                 license_status="active",
@@ -186,9 +185,8 @@ async def delete_organization(
     organization_id: int,
     _: dict[str, Any] = ADMIN_SESSION_DEPENDENCY,
 ) -> dict[str, Any]:
-    settings = get_settings()
     try:
-        async with CandidateRepository(settings.database_url) as repository:
+        async with CandidateRepository(pool=get_pool()) as repository:
             deleted = await repository.delete_organization(organization_id)
     except (OSError, TimeoutError, ValueError, asyncpg.PostgresError) as exc:
         raise HTTPException(status_code=503, detail=DATABASE_ERROR_MESSAGE) from exc
@@ -204,7 +202,7 @@ async def rotate_organization_license(
 ) -> dict[str, Any]:
     settings = get_settings()
     try:
-        async with CandidateRepository(settings.database_url) as repository:
+        async with CandidateRepository(pool=get_pool()) as repository:
             rotated = await repository.rotate_organization_license_key(
                 organization_id=organization_id,
                 credential_pepper=settings.product_key_pepper,

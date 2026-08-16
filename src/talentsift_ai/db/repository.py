@@ -27,19 +27,32 @@ from talentsift_ai.schemas import (
 
 
 class CandidateRepository:
-    def __init__(self, database_url: str) -> None:
+    """
+    database_url: opens and owns a dedicated pool for the lifetime of this instance
+    (CLI commands -- short-lived processes where a fresh pool per invocation is fine).
+    pool: uses an already-open, externally-owned pool (the web app's shared pool) and
+    never closes it -- creating a new asyncpg pool per HTTP request re-pays a TCP+TLS+
+    auth handshake with the database on every single request.
+    """
+
+    def __init__(
+        self, database_url: str | None = None, *, pool: asyncpg.Pool | None = None
+    ) -> None:
         self._database_url = database_url
-        self._pool: asyncpg.Pool | None = None
+        self._pool = pool
+        self._owns_pool = pool is None
 
     async def connect(self) -> None:
         if self._pool is None:
+            if self._database_url is None:
+                raise ValueError("CandidateRepository requires database_url or pool.")
             self._pool = await asyncpg.create_pool(
                 self._database_url,
                 statement_cache_size=0,
             )
 
     async def close(self) -> None:
-        if self._pool is not None:
+        if self._owns_pool and self._pool is not None:
             await self._pool.close()
             self._pool = None
 

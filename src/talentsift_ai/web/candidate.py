@@ -10,6 +10,7 @@ from talentsift_ai.db.repository import CandidateRepository
 from talentsift_ai.mistral_client import MistralClient, MistralClientError
 from talentsift_ai.pipeline import ResumeIngestionPipeline
 from talentsift_ai.settings import get_settings
+from talentsift_ai.web.db import get_pool
 from talentsift_ai.web.security import create_signed_session, verify_signed_session
 
 CANDIDATE_SESSION_COOKIE = "talentsift_candidate_session"
@@ -69,7 +70,7 @@ async def register_candidate(
         raise HTTPException(status_code=500, detail="Session secret is not configured.")
 
     try:
-        async with CandidateRepository(settings.database_url) as repository:
+        async with CandidateRepository(pool=get_pool()) as repository:
             candidate = await repository.create_candidate_user(
                 email=payload.email,
                 password=payload.password,
@@ -103,7 +104,7 @@ async def login_candidate(
         raise HTTPException(status_code=500, detail="Session secret is not configured.")
 
     try:
-        async with CandidateRepository(settings.database_url) as repository:
+        async with CandidateRepository(pool=get_pool()) as repository:
             candidate = await repository.authenticate_candidate_user(
                 email=payload.email,
                 password=payload.password,
@@ -135,10 +136,9 @@ async def logout_candidate(response: Response) -> dict[str, str]:
 
 @router.get("/profile")
 async def get_profile(session: dict[str, Any] = CANDIDATE_SESSION_DEPENDENCY) -> dict[str, Any]:
-    settings = get_settings()
     candidate_id = session["candidate_id"]
     try:
-        async with CandidateRepository(settings.database_url) as repository:
+        async with CandidateRepository(pool=get_pool()) as repository:
             profile = await repository.get_candidate_profile(candidate_id)
             if profile is None:
                 raise HTTPException(status_code=404, detail="Candidate profile not found.")
@@ -156,7 +156,6 @@ async def upload_cv(
     Parses uploaded PDF/Word CV once via Mistral OCR & Ministral-3B, generates embedding ONCE,
     and updates the candidate's master profile.
     """
-    settings = get_settings()
     candidate_id = session["candidate_id"]
 
     suffix = Path(file.filename).suffix.lower() if file.filename else ""
@@ -170,7 +169,7 @@ async def upload_cv(
 
     try:
         async with _create_mistral_client() as mistral:
-            async with CandidateRepository(settings.database_url) as repository:
+            async with CandidateRepository(pool=get_pool()) as repository:
                 pipeline = ResumeIngestionPipeline(mistral_client=mistral, repository=repository)
                 extracted = await pipeline.process_document(tmp_path)
 
@@ -201,9 +200,8 @@ async def upload_cv(
 
 @router.get("/jobs")
 async def list_jobs(session: dict[str, Any] = CANDIDATE_SESSION_DEPENDENCY) -> dict[str, Any]:
-    settings = get_settings()
     try:
-        async with CandidateRepository(settings.database_url) as repository:
+        async with CandidateRepository(pool=get_pool()) as repository:
             jobs = await repository.list_open_job_postings()
             return {"jobs": jobs}
     except (OSError, TimeoutError, ValueError, asyncpg.PostgresError) as exc:
@@ -218,11 +216,10 @@ async def apply_for_job(
     """
     Instantly applies to a job posting without re-embedding the candidate's CV ($O(1)$ action).
     """
-    settings = get_settings()
     candidate_id = session["candidate_id"]
 
     try:
-        async with CandidateRepository(settings.database_url) as repository:
+        async with CandidateRepository(pool=get_pool()) as repository:
             profile = await repository.get_candidate_profile(candidate_id)
             if not profile or not profile.get("has_embedding"):
                 raise HTTPException(
@@ -257,11 +254,10 @@ async def withdraw_application(
     """
     Withdraws a submitted job application.
     """
-    settings = get_settings()
     candidate_id = session["candidate_id"]
 
     try:
-        async with CandidateRepository(settings.database_url) as repository:
+        async with CandidateRepository(pool=get_pool()) as repository:
             success = await repository.withdraw_job_application(
                 job_posting_id=job_posting_id, candidate_id=candidate_id
             )
@@ -279,11 +275,10 @@ async def delete_cv(
     """
     Deletes candidate's uploaded CV profile.
     """
-    settings = get_settings()
     candidate_id = session["candidate_id"]
 
     try:
-        async with CandidateRepository(settings.database_url) as repository:
+        async with CandidateRepository(pool=get_pool()) as repository:
             await repository.delete_candidate_profile(candidate_id)
             return {"status": "ok", "message": "CV profile deleted successfully."}
     except (OSError, TimeoutError, ValueError, asyncpg.PostgresError) as exc:
@@ -294,10 +289,9 @@ async def delete_cv(
 async def list_my_applications(
     session: dict[str, Any] = CANDIDATE_SESSION_DEPENDENCY,
 ) -> dict[str, Any]:
-    settings = get_settings()
     candidate_id = session["candidate_id"]
     try:
-        async with CandidateRepository(settings.database_url) as repository:
+        async with CandidateRepository(pool=get_pool()) as repository:
             apps = await repository.list_candidate_applications(candidate_id)
             return {"applications": apps}
     except (OSError, TimeoutError, ValueError, asyncpg.PostgresError) as exc:

@@ -21,6 +21,7 @@ from talentsift_ai.mistral_client import MistralClient, MistralClientError
 from talentsift_ai.pipeline import HybridSearchService, ResumeIngestionPipeline
 from talentsift_ai.schemas import JobPostingCreate
 from talentsift_ai.settings import get_settings
+from talentsift_ai.web.db import get_pool
 from talentsift_ai.web.security import create_signed_session, verify_signed_session
 
 logger = logging.getLogger(__name__)
@@ -121,7 +122,7 @@ class OrgRegisterRequest(BaseModel):
 async def register(payload: OrgRegisterRequest) -> dict[str, Any]:
     settings = get_settings()
     try:
-        async with CandidateRepository(settings.database_url) as repository:
+        async with CandidateRepository(pool=get_pool()) as repository:
             res = await repository.create_organization_registration(
                 display_name=payload.display_name,
                 username=payload.username,
@@ -148,7 +149,7 @@ async def login(payload: OrgLoginRequest, response: Response) -> dict[str, Any]:
         raise HTTPException(status_code=500, detail="Session secret is not configured.")
 
     try:
-        async with CandidateRepository(settings.database_url) as repository:
+        async with CandidateRepository(pool=get_pool()) as repository:
             identity = await repository.authenticate_organization_user(
                 username=payload.username,
                 password=payload.password,
@@ -208,9 +209,8 @@ async def create_posting(
     payload: JobPostingRequest,
     session: dict[str, Any] = ORG_SESSION_DEPENDENCY,
 ) -> dict[str, Any]:
-    settings = get_settings()
     try:
-        async with CandidateRepository(settings.database_url) as repository:
+        async with CandidateRepository(pool=get_pool()) as repository:
             posting = await repository.create_job_posting(
                 JobPostingCreate(
                     organization_id=session["organization_id"],
@@ -226,9 +226,8 @@ async def create_posting(
 
 @router.get("/postings")
 async def list_postings(session: dict[str, Any] = ORG_SESSION_DEPENDENCY) -> dict[str, Any]:
-    settings = get_settings()
     try:
-        async with CandidateRepository(settings.database_url) as repository:
+        async with CandidateRepository(pool=get_pool()) as repository:
             rows = await repository.list_job_postings(session["organization_id"])
     except (OSError, TimeoutError, ValueError, asyncpg.PostgresError) as exc:
         raise HTTPException(status_code=503, detail=DATABASE_ERROR_MESSAGE) from exc
@@ -240,10 +239,9 @@ async def delete_posting(
     posting_id: int,
     session: dict[str, Any] = ORG_SESSION_DEPENDENCY,
 ) -> dict[str, Any]:
-    settings = get_settings()
     organization_id = session["organization_id"]
     try:
-        async with CandidateRepository(settings.database_url) as repository:
+        async with CandidateRepository(pool=get_pool()) as repository:
             await _get_posting_or_404(repository, posting_id, organization_id)
             await repository.delete_job_posting(posting_id, organization_id)
             return {"status": "ok", "message": "Job posting deleted successfully."}
@@ -261,10 +259,9 @@ async def toggle_posting_status(
     payload: TogglePostingStatusRequest,
     session: dict[str, Any] = ORG_SESSION_DEPENDENCY,
 ) -> dict[str, Any]:
-    settings = get_settings()
     organization_id = session["organization_id"]
     try:
-        async with CandidateRepository(settings.database_url) as repository:
+        async with CandidateRepository(pool=get_pool()) as repository:
             await _get_posting_or_404(repository, posting_id, organization_id)
             await repository.toggle_job_posting_status(
                 posting_id, organization_id, payload.is_active
@@ -287,10 +284,9 @@ async def list_candidates(
     offset: int = 0,
     session: dict[str, Any] = ORG_SESSION_DEPENDENCY,
 ) -> dict[str, Any]:
-    settings = get_settings()
     organization_id = session["organization_id"]
     try:
-        async with CandidateRepository(settings.database_url) as repository:
+        async with CandidateRepository(pool=get_pool()) as repository:
             await _get_posting_or_404(repository, posting_id, organization_id)
             rows = await repository.list_candidates(
                 organization_id=organization_id,
@@ -312,10 +308,9 @@ async def get_candidate(
     candidate_id: int,
     session: dict[str, Any] = ORG_SESSION_DEPENDENCY,
 ) -> dict[str, Any]:
-    settings = get_settings()
     organization_id = session["organization_id"]
     try:
-        async with CandidateRepository(settings.database_url) as repository:
+        async with CandidateRepository(pool=get_pool()) as repository:
             await _get_posting_or_404(repository, posting_id, organization_id)
             candidate = await repository.get_candidate(candidate_id, organization_id, posting_id)
             if candidate is None:
@@ -332,10 +327,9 @@ async def search_candidates(
     payload: CandidateSearchRequest,
     session: dict[str, Any] = ORG_SESSION_DEPENDENCY,
 ) -> dict[str, Any]:
-    settings = get_settings()
     organization_id = session["organization_id"]
     try:
-        async with CandidateRepository(settings.database_url) as repository:
+        async with CandidateRepository(pool=get_pool()) as repository:
             posting = await _get_posting_or_404(repository, posting_id, organization_id)
             job_description = payload.job_description or posting["description"]
             async with _create_mistral_client() as mistral:
@@ -373,7 +367,7 @@ async def upload_candidates(
     created: list[dict[str, Any]] = []
     errors: list[dict[str, str]] = []
     try:
-        async with CandidateRepository(settings.database_url) as repository:
+        async with CandidateRepository(pool=get_pool()) as repository:
             await _get_posting_or_404(repository, posting_id, organization_id)
             async with _create_mistral_client() as mistral:
                 pipeline = ResumeIngestionPipeline(
@@ -408,10 +402,9 @@ async def top_rankings(
     limit: int = 5,
     session: dict[str, Any] = ORG_SESSION_DEPENDENCY,
 ) -> dict[str, Any]:
-    settings = get_settings()
     organization_id = session["organization_id"]
     try:
-        async with CandidateRepository(settings.database_url) as repository:
+        async with CandidateRepository(pool=get_pool()) as repository:
             await _get_posting_or_404(repository, posting_id, organization_id)
             rows = await repository.top_results(organization_id, posting_id, limit=limit)
     except (OSError, TimeoutError, ValueError, asyncpg.PostgresError) as exc:
@@ -425,10 +418,9 @@ async def run_debate(
     payload: DebateRequest,
     session: dict[str, Any] = ORG_SESSION_DEPENDENCY,
 ) -> dict[str, Any]:
-    settings = get_settings()
     organization_id = session["organization_id"]
     try:
-        async with CandidateRepository(settings.database_url) as repository:
+        async with CandidateRepository(pool=get_pool()) as repository:
             posting = await _get_posting_or_404(repository, posting_id, organization_id)
             candidate = await repository.get_candidate(
                 payload.candidate_id, organization_id, posting_id
@@ -495,7 +487,7 @@ async def _run_shortlist_debate(
             timeout_seconds=settings.request_timeout_seconds,
             max_concurrency=settings.max_concurrency,
         ) as mistral:
-            async with CandidateRepository(settings.database_url) as repository:
+            async with CandidateRepository(pool=get_pool()) as repository:
                 await asyncio.gather(
                     *(_evaluate(cid, mistral, repository) for cid in candidate_ids)
                 )
@@ -516,10 +508,9 @@ async def create_shortlist(
     Optimist/Pessimist/Arbitrator debate for each in the background. Progress shows up
     incrementally on GET /postings/{posting_id}/rankings/top as each debate finishes.
     """
-    settings = get_settings()
     organization_id = session["organization_id"]
     try:
-        async with CandidateRepository(settings.database_url) as repository:
+        async with CandidateRepository(pool=get_pool()) as repository:
             posting = await _get_posting_or_404(repository, posting_id, organization_id)
             job_description = payload.job_description or posting["description"]
 
