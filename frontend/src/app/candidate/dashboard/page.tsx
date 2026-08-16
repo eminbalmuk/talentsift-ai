@@ -274,25 +274,27 @@ export default function CandidateDashboardPage() {
                       key={job.id}
                       className="flex flex-col justify-between border-border/60 shadow-sm transition-all hover:border-primary/40 hover:shadow-md bg-card/80 backdrop-blur-sm"
                     >
-                      <CardHeader className="pb-3">
-                        <div className="flex items-center justify-between mb-1">
-                          <span className="text-xs font-semibold text-primary uppercase tracking-wider">
-                            {job.organization_name}
-                          </span>
-                          {job.deadline_at && (
-                            <span className="text-[11px] text-muted-foreground flex items-center gap-1">
-                              <Clock className="h-3 w-3" />
-                              {new Date(job.deadline_at).toLocaleDateString("tr-TR")}
+                      <Link href={`/candidate/jobs/${job.id}`} className="block">
+                        <CardHeader className="pb-3">
+                          <div className="flex items-center justify-between mb-1">
+                            <span className="text-xs font-semibold text-primary uppercase tracking-wider">
+                              {job.organization_name}
                             </span>
-                          )}
-                        </div>
-                        <CardTitle className="text-base font-semibold text-foreground leading-snug">
-                          {job.title}
-                        </CardTitle>
-                        <CardDescription className="line-clamp-3 text-xs mt-2 text-muted-foreground leading-relaxed">
-                          {job.description}
-                        </CardDescription>
-                      </CardHeader>
+                            {job.deadline_at && (
+                              <span className="text-[11px] text-muted-foreground flex items-center gap-1">
+                                <Clock className="h-3 w-3" />
+                                {new Date(job.deadline_at).toLocaleDateString("tr-TR")}
+                              </span>
+                            )}
+                          </div>
+                          <CardTitle className="text-base font-semibold text-foreground leading-snug hover:text-primary transition-colors">
+                            {job.title}
+                          </CardTitle>
+                          <CardDescription className="line-clamp-3 text-xs mt-2 text-muted-foreground leading-relaxed">
+                            {job.description}
+                          </CardDescription>
+                        </CardHeader>
+                      </Link>
                       <CardContent className="pt-0">
                         {isApplied ? (
                           <Button disabled variant="secondary" className="w-full gap-1.5 text-xs h-9 bg-emerald-500/10 text-emerald-600 border border-emerald-500/20">

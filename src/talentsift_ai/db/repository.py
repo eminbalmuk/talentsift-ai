@@ -1078,6 +1078,21 @@ class CandidateRepository:
             )
         return [dict(row) for row in rows]
 
+    async def get_open_job_posting(self, posting_id: int) -> dict[str, Any] | None:
+        await self._ensure_connected()
+        async with self._pool.acquire() as connection:
+            row = await connection.fetchrow(
+                """
+                SELECT j.id, j.organization_id, o.display_name AS organization_name,
+                       j.title, j.description, j.deadline_at, j.created_at
+                FROM job_postings j
+                JOIN organizations o ON o.id = j.organization_id
+                WHERE j.id = $1 AND j.is_active = TRUE AND o.is_active = TRUE
+                """,
+                posting_id,
+            )
+        return None if row is None else dict(row)
+
     async def list_candidate_applications(self, candidate_id: int) -> list[dict[str, Any]]:
         await self._ensure_connected()
         async with self._pool.acquire() as connection:

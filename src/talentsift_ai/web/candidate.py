@@ -208,6 +208,21 @@ async def list_jobs(session: dict[str, Any] = CANDIDATE_SESSION_DEPENDENCY) -> d
         raise HTTPException(status_code=503, detail=DATABASE_ERROR_MESSAGE) from exc
 
 
+@router.get("/jobs/{job_posting_id}")
+async def get_job(
+    job_posting_id: int,
+    session: dict[str, Any] = CANDIDATE_SESSION_DEPENDENCY,
+) -> dict[str, Any]:
+    try:
+        async with CandidateRepository(pool=get_pool()) as repository:
+            posting = await repository.get_open_job_posting(job_posting_id)
+    except (OSError, TimeoutError, ValueError, asyncpg.PostgresError) as exc:
+        raise HTTPException(status_code=503, detail=DATABASE_ERROR_MESSAGE) from exc
+    if posting is None:
+        raise HTTPException(status_code=404, detail="Job posting not found or no longer active.")
+    return {"job": posting}
+
+
 @router.post("/jobs/{job_posting_id}/apply")
 async def apply_for_job(
     job_posting_id: int,
