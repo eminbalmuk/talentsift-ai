@@ -1,7 +1,18 @@
+import asyncio
+import logging
 from typing import Any
 
 import asyncpg
-from fastapi import APIRouter, Cookie, Depends, File, HTTPException, Response, UploadFile
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Cookie,
+    Depends,
+    File,
+    HTTPException,
+    Response,
+    UploadFile,
+)
 from pydantic import BaseModel, Field
 
 from talentsift_ai.agents import DebateGraph
@@ -12,11 +23,21 @@ from talentsift_ai.schemas import JobPostingCreate
 from talentsift_ai.settings import get_settings
 from talentsift_ai.web.security import create_signed_session, verify_signed_session
 
+logger = logging.getLogger(__name__)
+
 SESSION_COOKIE = "talentsift_org_session"
 DATABASE_ERROR_MESSAGE = (
     "Database is not reachable. Start local Postgres, run migrations, then try again."
 )
 MAX_UPLOAD_FILES = 20
+# Candidates below this fraction of the top candidate's pre-LLM score are dropped from
+# the shortlist even if the requested candidate_count isn't reached yet -- a low-relevance
+# applicant shouldn't consume an expensive debate slot just to fill a quota.
+SHORTLIST_RELEVANCE_CUTOFF_RATIO = 0.5
+# mistral-large (used by the arbitrator step) has a very low account-wide rate limit, so
+# keep shortlist debate concurrency modest -- higher concurrency here wouldn't buy more
+# throughput, only more 429 retries.
+SHORTLIST_CONCURRENCY = 3
 
 router = APIRouter(prefix="/api/org", tags=["organization"])
 
@@ -43,6 +64,14 @@ class CandidateSearchRequest(BaseModel):
 class DebateRequest(BaseModel):
     candidate_id: int
     job_description: str | None = None
+
+
+class ShortlistRequest(BaseModel):
+    candidate_count: int = Field(ge=1, le=500)
+    job_description: str | None = None
+    min_gpa: float | None = None
+    class_year: int | None = None
+    min_experience_years: int | None = None
 
 
 async def get_org_session(
@@ -420,3 +449,128 @@ async def run_debate(
     except (OSError, TimeoutError, ValueError, asyncpg.PostgresError) as exc:
         raise HTTPException(status_code=503, detail=DATABASE_ERROR_MESSAGE) from exc
     return {"id": result_id, **result.model_dump()}
+
+
+async def _run_shortlist_debate(
+    *,
+    organization_id: int,
+    posting_id: int,
+    job_description: str,
+    candidate_ids: list[int],
+) -> None:
+    """Runs the Optimist/Pessimist/Arbitrator debate for a shortlist of candidates.
+
+    Scheduled via BackgroundTasks, so it runs after the HTTP response is sent and
+    can't reuse the request-scoped Mistral client / DB connection (those are already
+    closed by then) -- it opens its own.
+    """
+    settings = get_settings()
+    semaphore = asyncio.Semaphore(SHORTLIST_CONCURRENCY)
+
+    async def _evaluate(
+        candidate_id: int, mistral: MistralClient, repository: CandidateRepository
+    ) -> None:
+        async with semaphore:
+            try:
+                candidate = await repository.get_candidate(
+                    candidate_id, organization_id, posting_id
+                )
+                if candidate is None:
+                    return
+                graph = DebateGraph(mistral)
+                result = await graph.evaluate(
+                    organization_id=organization_id,
+                    candidate_id=candidate.id,
+                    cv_text=candidate.raw_cv_text,
+                    job_description=job_description,
+                )
+                await repository.save_debate_result(result)
+            except Exception:
+                logger.exception("Shortlist debate failed for candidate %s", candidate_id)
+
+    try:
+        async with MistralClient(
+            api_keys=settings.mistral_api_keys,
+            base_url=settings.mistral_base_url,
+            timeout_seconds=settings.request_timeout_seconds,
+            max_concurrency=settings.max_concurrency,
+        ) as mistral:
+            async with CandidateRepository(settings.database_url) as repository:
+                await asyncio.gather(
+                    *(_evaluate(cid, mistral, repository) for cid in candidate_ids)
+                )
+    except Exception:
+        logger.exception("Shortlist debate batch failed for posting %s", posting_id)
+
+
+@router.post("/postings/{posting_id}/shortlist")
+async def create_shortlist(
+    posting_id: int,
+    payload: ShortlistRequest,
+    background_tasks: BackgroundTasks,
+    session: dict[str, Any] = ORG_SESSION_DEPENDENCY,
+) -> dict[str, Any]:
+    """
+    Ranks applicants with the Pre-LLM stage (embedding + BM25 + FlashRank), keeps up to
+    candidate_count of them (fewer if relevance drops off sharply), and queues the
+    Optimist/Pessimist/Arbitrator debate for each in the background. Progress shows up
+    incrementally on GET /postings/{posting_id}/rankings/top as each debate finishes.
+    """
+    settings = get_settings()
+    organization_id = session["organization_id"]
+    try:
+        async with CandidateRepository(settings.database_url) as repository:
+            posting = await _get_posting_or_404(repository, posting_id, organization_id)
+            job_description = payload.job_description or posting["description"]
+
+            async with _create_mistral_client() as mistral:
+                service = HybridSearchService(mistral_client=mistral, repository=repository)
+                ranked = await service.rank(
+                    organization_id=organization_id,
+                    job_posting_id=posting_id,
+                    job_description=job_description,
+                    min_gpa=payload.min_gpa,
+                    class_year=payload.class_year,
+                    min_experience_years=payload.min_experience_years,
+                    limit=payload.candidate_count,
+                )
+
+            if not ranked:
+                return {
+                    "status": "ok",
+                    "shortlisted_count": 0,
+                    "queued_count": 0,
+                    "already_evaluated_count": 0,
+                    "queued": [],
+                    "already_evaluated": [],
+                }
+
+            def score(candidate: dict[str, Any]) -> float:
+                return float(candidate.get("pre_llm_score") or candidate.get("similarity") or 0.0)
+
+            cutoff = score(ranked[0]) * SHORTLIST_RELEVANCE_CUTOFF_RATIO
+            shortlisted = [c for c in ranked if score(c) >= cutoff]
+
+            already_evaluated_ids = await repository.evaluated_candidate_ids(organization_id)
+            to_queue = [c for c in shortlisted if c["id"] not in already_evaluated_ids]
+            skipped = [c for c in shortlisted if c["id"] in already_evaluated_ids]
+    except (OSError, TimeoutError, ValueError, asyncpg.PostgresError) as exc:
+        raise HTTPException(status_code=503, detail=DATABASE_ERROR_MESSAGE) from exc
+
+    if to_queue:
+        background_tasks.add_task(
+            _run_shortlist_debate,
+            organization_id=organization_id,
+            posting_id=posting_id,
+            job_description=job_description,
+            candidate_ids=[c["id"] for c in to_queue],
+        )
+
+    return {
+        "status": "ok",
+        "shortlisted_count": len(shortlisted),
+        "queued_count": len(to_queue),
+        "already_evaluated_count": len(skipped),
+        "queued": [{"id": c["id"], "full_name": c["full_name"]} for c in to_queue],
+        "already_evaluated": [{"id": c["id"], "full_name": c["full_name"]} for c in skipped],
+    }

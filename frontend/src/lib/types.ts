@@ -122,3 +122,17 @@ export interface TopResult {
   arbitrator_rationale: string;
   is_selected: boolean;
 }
+
+export interface ShortlistCandidateRef {
+  id: number;
+  full_name: string;
+}
+
+export interface ShortlistResponse {
+  status: string;
+  shortlisted_count: number;
+  queued_count: number;
+  already_evaluated_count: number;
+  queued: ShortlistCandidateRef[];
+  already_evaluated: ShortlistCandidateRef[];
+}

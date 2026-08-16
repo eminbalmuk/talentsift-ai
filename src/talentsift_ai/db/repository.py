@@ -585,6 +585,15 @@ class CandidateRepository:
             rows = await connection.fetch(sql, *values)
         return [dict(row) for row in rows]
 
+    async def evaluated_candidate_ids(self, organization_id: int) -> set[int]:
+        await self._ensure_connected()
+        async with self._pool.acquire() as connection:
+            rows = await connection.fetch(
+                "SELECT DISTINCT candidate_id FROM debate_results WHERE organization_id = $1",
+                organization_id,
+            )
+        return {row["candidate_id"] for row in rows}
+
     async def latest_debate_result(
         self, candidate_id: int, organization_id: int
     ) -> dict[str, Any] | None:

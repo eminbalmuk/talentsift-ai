@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import { Award, CalendarClock, CheckCircle2, Search, TrendingUp, Upload, Users } from "lucide-react";
+import { Award, CalendarClock, CheckCircle2, ListChecks, Search, TrendingUp, Upload, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -22,7 +22,17 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { apiGet, apiPost, apiUpload, ApiError } from "@/lib/api";
-import type { Candidate, JobPosting, RankedCandidate, TopResult, UploadResult } from "@/lib/types";
+import type {
+  Candidate,
+  JobPosting,
+  RankedCandidate,
+  ShortlistResponse,
+  TopResult,
+  UploadResult,
+} from "@/lib/types";
+
+const SHORTLIST_POLL_INTERVAL_MS = 6000;
+const SHORTLIST_POLL_TIMEOUT_MS = 10 * 60 * 1000;
 
 function formatDate(value: string | null): string | null {
   if (!value) return null;
@@ -42,6 +52,11 @@ export default function PostingDetailPage() {
   const [classYear, setClassYear] = useState("");
   const [minExperience, setMinExperience] = useState("");
   const [searching, setSearching] = useState(false);
+
+  const [interviewSlots, setInterviewSlots] = useState("50");
+  const [shortlisting, setShortlisting] = useState(false);
+  // Total row count "Nihai sıralama" should reach before polling stops (null = not polling).
+  const [shortlistTarget, setShortlistTarget] = useState<number | null>(null);
 
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -109,6 +124,80 @@ export default function PostingDetailPage() {
       setSearching(false);
     }
   }
+
+  async function handleShortlist() {
+    const count = Number(interviewSlots);
+    if (!count || count < 1) {
+      toast.error("Mülakata geçecek aday sayısını girin.");
+      return;
+    }
+    setShortlisting(true);
+    try {
+      const data = await apiPost<ShortlistResponse>(
+        `/api/org/postings/${postingId}/shortlist`,
+        {
+          candidate_count: count,
+          min_gpa: minGpa ? Number(minGpa) : undefined,
+          class_year: classYear ? Number(classYear) : undefined,
+          min_experience_years: minExperience ? Number(minExperience) : undefined,
+        },
+      );
+      if (data.shortlisted_count === 0) {
+        toast.error("Kriterlere uyan aday bulunamadı.");
+        return;
+      }
+      if (data.queued_count > 0) {
+        toast.success(
+          `${data.shortlisted_count} aday kısa listeye alındı, ${data.queued_count} tanesi için analiz başladı. Sonuçlar tamamlandıkça aşağıda görünecek.`,
+        );
+        setShortlistTarget((results?.length ?? 0) + data.queued_count);
+      } else {
+        toast.success(
+          `${data.shortlisted_count} aday kısa listeye alındı, hepsi zaten daha önce değerlendirilmiş.`,
+        );
+      }
+      await loadRankings();
+    } catch (error) {
+      toast.error(error instanceof ApiError ? error.message : "Kısa liste oluşturulamadı.");
+    } finally {
+      setShortlisting(false);
+    }
+  }
+
+  useEffect(() => {
+    if (shortlistTarget === null) return;
+    let cancelled = false;
+    let stopped = false;
+    const startedAt = Date.now();
+
+    async function poll() {
+      if (stopped) return;
+      try {
+        const data = await apiGet<{ results: TopResult[] }>(
+          `/api/org/postings/${postingId}/rankings/top?limit=200`,
+        );
+        if (cancelled) return;
+        setResults(data.results);
+        if (shortlistTarget !== null && data.results.length >= shortlistTarget) {
+          stopped = true;
+          setShortlistTarget(null);
+          return;
+        }
+      } catch {
+        // Transient error while polling -- keep trying until the timeout.
+      }
+      if (!cancelled && Date.now() - startedAt >= SHORTLIST_POLL_TIMEOUT_MS) {
+        stopped = true;
+        setShortlistTarget(null);
+      }
+    }
+
+    const interval = setInterval(poll, SHORTLIST_POLL_INTERVAL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [shortlistTarget, postingId]);
 
   async function handleUpload() {
     const files = fileInputRef.current?.files;
@@ -329,6 +418,41 @@ export default function PostingDetailPage() {
         </TabsContent>
 
         <TabsContent value="rankings" className="mt-4 flex flex-col gap-4">
+          <Card className="border-border/60 p-4">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+              <div className="flex flex-1 flex-col gap-1.5">
+                <Label htmlFor="interviewSlots">Mülakata geçecek aday sayısı</Label>
+                <Input
+                  id="interviewSlots"
+                  type="number"
+                  min={1}
+                  max={500}
+                  value={interviewSlots}
+                  onChange={(event) => setInterviewSlots(event.target.value)}
+                />
+              </div>
+              <Button
+                onClick={handleShortlist}
+                disabled={shortlisting}
+                className="gap-1.5 sm:w-fit"
+              >
+                <ListChecks className="h-4 w-4" />
+                {shortlisting ? "Kısa liste oluşturuluyor..." : "Kısa liste oluştur ve analizi başlat"}
+              </Button>
+            </div>
+            <p className="mt-2 text-xs text-muted-foreground">
+              Ön eleme (embedding + BM25 + FlashRank) sıralamasından en iyi N aday seçilir; ilan
+              ile alakası düşük adaylar N&apos;e ulaşmak için dahil edilmez. Seçilen adaylar için
+              Optimist/Pessimist/Arbitrator analizi arka planda çalışır, sonuçlar tamamlandıkça
+              aşağıdaki tabloya düşer.
+            </p>
+            {shortlistTarget !== null ? (
+              <p className="mt-2 text-xs font-medium text-primary">
+                Analiz devam ediyor, sonuçlar otomatik güncelleniyor…
+              </p>
+            ) : null}
+          </Card>
+
           <div className="grid gap-4 sm:grid-cols-2">
             <StatCard label="Ortalama puan" value={averageScore} icon={TrendingUp} />
             <StatCard label="En yüksek puan" value={topScore} icon={Award} />
