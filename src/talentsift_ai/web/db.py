@@ -10,12 +10,16 @@ opens one pool at FastAPI startup and every request reuses it.
 
 import asyncpg
 
+from talentsift_ai.db.repository import init_connection
+
 _pool: asyncpg.Pool | None = None
 
 
 async def init_pool(database_url: str) -> None:
     global _pool
-    _pool = await asyncpg.create_pool(database_url, statement_cache_size=0)
+    _pool = await asyncpg.create_pool(
+        database_url, statement_cache_size=0, init=init_connection
+    )
 
 
 async def close_pool() -> None:

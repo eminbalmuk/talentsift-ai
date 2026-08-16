@@ -26,6 +26,18 @@ from talentsift_ai.schemas import (
 )
 
 
+async def init_connection(connection: asyncpg.Connection) -> None:
+    """
+    Postgres NUMERIC columns (gpa) decode to Python Decimal by default, which
+    FastAPI's JSON encoder then serializes as a *string* (e.g. "3.40") -- the
+    frontend expects a number and crashes calling .toFixed() on a string. Decode
+    numeric as float8 for every connection so the API always returns real numbers.
+    """
+    await connection.set_type_codec(
+        "numeric", schema="pg_catalog", encoder=str, decoder=float, format="text"
+    )
+
+
 class CandidateRepository:
     """
     database_url: opens and owns a dedicated pool for the lifetime of this instance
@@ -49,6 +61,7 @@ class CandidateRepository:
             self._pool = await asyncpg.create_pool(
                 self._database_url,
                 statement_cache_size=0,
+                init=init_connection,
             )
 
     async def close(self) -> None:
