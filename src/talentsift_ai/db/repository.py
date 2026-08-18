@@ -665,12 +665,18 @@ class CandidateRepository:
             rows = await connection.fetch(sql, *values)
         return [dict(row) for row in rows]
 
-    async def evaluated_candidate_ids(self, organization_id: int) -> set[int]:
+    async def evaluated_candidate_ids(
+        self, organization_id: int, job_posting_id: int
+    ) -> set[int]:
         await self._ensure_connected()
         async with self._pool.acquire() as connection:
             rows = await connection.fetch(
-                "SELECT DISTINCT candidate_id FROM debate_results WHERE organization_id = $1",
+                """
+                SELECT DISTINCT candidate_id FROM debate_results
+                WHERE organization_id = $1 AND job_posting_id = $2
+                """,
                 organization_id,
+                job_posting_id,
             )
         return {row["candidate_id"] for row in rows}
 
@@ -683,7 +689,8 @@ class CandidateRepository:
                 """
                 SELECT id, optimist_score, optimist_arguments, pessimist_score,
                        pessimist_arguments, final_score, arbitrator_rationale,
-                       is_selected, created_at
+                       is_selected, created_at, pre_llm_score, relevance_score,
+                       competency_score
                 FROM debate_results
                 WHERE candidate_id = $1 AND organization_id = $2
                 ORDER BY created_at DESC
@@ -693,6 +700,164 @@ class CandidateRepository:
                 organization_id,
             )
         return None if row is None else dict(row)
+
+    async def finalize_shortlist(
+        self,
+        *,
+        organization_id: int,
+        job_posting_id: int,
+        interview_slots: int,
+    ) -> dict[str, Any]:
+        """Locks in the interview shortlist: the top `interview_slots` evaluated
+        candidates (by final_score) become 'selected', the rest that were evaluated
+        become 'rejected', and applicants who never reached the LLM debate stage at
+        all also become 'rejected'. A candidate_notifications row is written for every
+        application whose status actually changes, so re-clicking after evaluating
+        more candidates doesn't spam duplicate notifications.
+        """
+        await self._ensure_connected()
+        async with self._pool.acquire() as connection:
+            async with connection.transaction():
+                evaluated = await connection.fetch(
+                    """
+                    SELECT a.id AS application_id, a.candidate_id, a.status,
+                           d.id AS debate_result_id, d.final_score
+                    FROM debate_results d
+                    JOIN job_applications a ON a.candidate_id = d.candidate_id
+                    WHERE d.organization_id = $1 AND a.job_posting_id = $2
+                    ORDER BY d.final_score DESC, d.created_at DESC
+                    """,
+                    organization_id,
+                    job_posting_id,
+                )
+                selected_ids = {row["application_id"] for row in evaluated[:interview_slots]}
+
+                not_evaluated = await connection.fetch(
+                    """
+                    SELECT a.id AS application_id, a.candidate_id, a.status
+                    FROM job_applications a
+                    WHERE a.organization_id = $1 AND a.job_posting_id = $2
+                      AND NOT EXISTS (
+                          SELECT 1 FROM debate_results d
+                          WHERE d.organization_id = a.organization_id
+                                AND d.candidate_id = a.candidate_id
+                      )
+                    """,
+                    organization_id,
+                    job_posting_id,
+                )
+
+                selected_count = 0
+                rejected_post_llm_count = 0
+                rejected_pre_llm_count = 0
+                notifications_sent = 0
+
+                for row in evaluated:
+                    new_status = "selected" if row["application_id"] in selected_ids else "rejected"
+                    if new_status == "selected":
+                        selected_count += 1
+                    else:
+                        rejected_post_llm_count += 1
+                    if row["status"] == new_status:
+                        continue
+                    await connection.execute(
+                        "UPDATE job_applications SET status = $2 WHERE id = $1",
+                        row["application_id"],
+                        new_status,
+                    )
+                    if new_status == "selected":
+                        title = "Mülakat aşamasına geçtiniz"
+                        message = (
+                            "Tebrikler! Başvurunuz değerlendirildi ve bu pozisyon için "
+                            "mülakat aşamasına geçtiniz. Kuruluş sizinle iletişime geçecektir."
+                        )
+                    else:
+                        title = "Başvurunuz değerlendirildi"
+                        message = (
+                            "Başvurunuz yapay zeka ajanları tarafından değerlendirildi, ancak bu "
+                            "pozisyon için şu an sizinle ilerlemiyoruz. Değerlendirme raporunun "
+                            "tamamını bu bildirimden inceleyebilirsiniz."
+                        )
+                    await connection.execute(
+                        """
+                        INSERT INTO candidate_notifications
+                            (candidate_id, job_posting_id, organization_id, type, title,
+                             message, debate_result_id)
+                        VALUES ($1, $2, $3, $4, $5, $6, $7)
+                        """,
+                        row["candidate_id"],
+                        job_posting_id,
+                        organization_id,
+                        "selected" if new_status == "selected" else "rejected_post_llm",
+                        title,
+                        message,
+                        row["debate_result_id"],
+                    )
+                    notifications_sent += 1
+
+                for row in not_evaluated:
+                    rejected_pre_llm_count += 1
+                    if row["status"] == "rejected":
+                        continue
+                    await connection.execute(
+                        "UPDATE job_applications SET status = 'rejected' WHERE id = $1",
+                        row["application_id"],
+                    )
+                    await connection.execute(
+                        """
+                        INSERT INTO candidate_notifications
+                            (candidate_id, job_posting_id, organization_id, type, title, message)
+                        VALUES ($1, $2, $3, 'rejected_pre_llm', $4, $5)
+                        """,
+                        row["candidate_id"],
+                        job_posting_id,
+                        organization_id,
+                        "Başvurunuz değerlendirildi",
+                        "Başvurunuz ilk elemede incelendi; profiliniz bu ilanın aradığı "
+                        "niteliklerle yeterli ölçüde örtüşmediği için bu pozisyon için "
+                        "sizinle ilerlemiyoruz. Başka ilanlara başvurmaya devam edebilirsiniz.",
+                    )
+                    notifications_sent += 1
+
+        return {
+            "selected_count": selected_count,
+            "rejected_post_llm_count": rejected_post_llm_count,
+            "rejected_pre_llm_count": rejected_pre_llm_count,
+            "notifications_sent": notifications_sent,
+        }
+
+    async def list_candidate_notifications(self, candidate_id: int) -> list[dict[str, Any]]:
+        await self._ensure_connected()
+        async with self._pool.acquire() as connection:
+            rows = await connection.fetch(
+                """
+                SELECT n.id, n.type, n.title, n.message, n.is_read, n.created_at,
+                       j.title AS job_title, o.display_name AS organization_name,
+                       d.optimist_score, d.optimist_arguments, d.pessimist_score,
+                       d.pessimist_arguments, d.final_score, d.arbitrator_rationale
+                FROM candidate_notifications n
+                LEFT JOIN job_postings j ON j.id = n.job_posting_id
+                LEFT JOIN organizations o ON o.id = n.organization_id
+                LEFT JOIN debate_results d ON d.id = n.debate_result_id
+                WHERE n.candidate_id = $1
+                ORDER BY n.created_at DESC
+                """,
+                candidate_id,
+            )
+        return [dict(row) for row in rows]
+
+    async def mark_notification_read(self, notification_id: int, candidate_id: int) -> bool:
+        await self._ensure_connected()
+        async with self._pool.acquire() as connection:
+            result = await connection.execute(
+                """
+                UPDATE candidate_notifications SET is_read = TRUE
+                WHERE id = $1 AND candidate_id = $2
+                """,
+                notification_id,
+                candidate_id,
+            )
+        return "UPDATE 1" in result
 
     async def search_candidates(
         self,
@@ -875,7 +1040,15 @@ class CandidateRepository:
                 limit=limit,
             )
 
-    async def save_debate_result(self, result: DebateResult) -> int:
+    async def save_debate_result(
+        self,
+        result: DebateResult,
+        *,
+        job_posting_id: int | None = None,
+        pre_llm_score: float | None = None,
+        relevance_score: float | None = None,
+        competency_score: float | None = None,
+    ) -> int:
         await self._ensure_connected()
         async with self._pool.acquire() as connection:
             row = await connection.fetchrow(
@@ -889,9 +1062,13 @@ class CandidateRepository:
                     pessimist_arguments,
                     final_score,
                     arbitrator_rationale,
-                    is_selected
+                    is_selected,
+                    job_posting_id,
+                    pre_llm_score,
+                    relevance_score,
+                    competency_score
                 )
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
                 RETURNING id
                 """,
                 result.organization_id,
@@ -903,8 +1080,54 @@ class CandidateRepository:
                 result.final_score,
                 result.arbitrator_rationale,
                 result.is_selected,
+                job_posting_id,
+                pre_llm_score,
+                relevance_score,
+                competency_score,
             )
         return row["id"]
+
+    async def get_candidate_similarity(
+        self,
+        *,
+        candidate_id: int,
+        organization_id: int,
+        job_posting_id: int,
+        query_embedding: list[float],
+    ) -> float | None:
+        """Cosine similarity between a single candidate's CV embedding and a query
+        embedding, used to back-fill pre-LLM scores for the ad-hoc single-candidate
+        debate button (which doesn't go through the full ranking pipeline)."""
+        await self._ensure_connected()
+        embedding_pg = to_pgvector(query_embedding)
+        async with self._pool.acquire() as connection:
+            value = await connection.fetchval(
+                """
+                SELECT 1 - (p.cv_embedding <=> $1::vector) AS similarity
+                FROM job_applications a
+                JOIN candidate_profiles p ON p.candidate_id = a.candidate_id
+                WHERE p.candidate_id = $2 AND a.organization_id = $3 AND a.job_posting_id = $4
+                      AND p.cv_embedding IS NOT NULL
+                """,
+                embedding_pg,
+                candidate_id,
+                organization_id,
+                job_posting_id,
+            )
+            if value is None:
+                value = await connection.fetchval(
+                    """
+                    SELECT 1 - (cv_embedding <=> $1::vector) AS similarity
+                    FROM candidates
+                    WHERE id = $2 AND organization_id = $3 AND job_posting_id = $4
+                          AND cv_embedding IS NOT NULL
+                    """,
+                    embedding_pg,
+                    candidate_id,
+                    organization_id,
+                    job_posting_id,
+                )
+        return float(value) if value is not None else None
 
     async def top_results(
         self, organization_id: int, job_posting_id: int, limit: int = 5
@@ -914,7 +1137,9 @@ class CandidateRepository:
             rows = await connection.fetch(
                 """
                 SELECT p.candidate_id, u.full_name, p.university,
-                       d.final_score, d.arbitrator_rationale, d.is_selected
+                       d.final_score, d.arbitrator_rationale, d.is_selected,
+                       d.pre_llm_score, d.relevance_score, d.competency_score,
+                       a.status AS application_status
                 FROM debate_results d
                 JOIN job_applications a ON a.candidate_id = d.candidate_id
                 JOIN candidate_profiles p ON p.candidate_id = a.candidate_id
@@ -933,7 +1158,9 @@ class CandidateRepository:
             rows = await connection.fetch(
                 """
                 SELECT c.id AS candidate_id, c.full_name, c.university,
-                       d.final_score, d.arbitrator_rationale, d.is_selected
+                       d.final_score, d.arbitrator_rationale, d.is_selected,
+                       d.pre_llm_score, d.relevance_score, d.competency_score,
+                       NULL::VARCHAR AS application_status
                 FROM debate_results d
                 JOIN candidates c ON c.id = d.candidate_id
                 WHERE d.organization_id = $1 AND c.job_posting_id = $2

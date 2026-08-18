@@ -321,3 +321,32 @@ async def list_my_applications(
             return {"applications": apps}
     except (OSError, TimeoutError, ValueError, asyncpg.PostgresError) as exc:
         raise HTTPException(status_code=503, detail=DATABASE_ERROR_MESSAGE) from exc
+
+
+@router.get("/notifications")
+async def list_notifications(
+    session: dict[str, Any] = CANDIDATE_SESSION_DEPENDENCY,
+) -> dict[str, Any]:
+    candidate_id = session["candidate_id"]
+    try:
+        async with CandidateRepository(pool=get_pool()) as repository:
+            notifications = await repository.list_candidate_notifications(candidate_id)
+            return {"notifications": notifications}
+    except (OSError, TimeoutError, ValueError, asyncpg.PostgresError) as exc:
+        raise HTTPException(status_code=503, detail=DATABASE_ERROR_MESSAGE) from exc
+
+
+@router.post("/notifications/{notification_id}/read")
+async def mark_notification_read(
+    notification_id: int,
+    session: dict[str, Any] = CANDIDATE_SESSION_DEPENDENCY,
+) -> dict[str, Any]:
+    candidate_id = session["candidate_id"]
+    try:
+        async with CandidateRepository(pool=get_pool()) as repository:
+            ok = await repository.mark_notification_read(notification_id, candidate_id)
+            if not ok:
+                raise HTTPException(status_code=404, detail="Notification not found.")
+            return {"status": "ok"}
+    except (OSError, TimeoutError, ValueError, asyncpg.PostgresError) as exc:
+        raise HTTPException(status_code=503, detail=DATABASE_ERROR_MESSAGE) from exc

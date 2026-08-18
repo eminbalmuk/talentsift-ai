@@ -19,6 +19,7 @@ from talentsift_ai.agents import DebateGraph
 from talentsift_ai.db.repository import CandidateRepository
 from talentsift_ai.mistral_client import MistralClient, MistralClientError
 from talentsift_ai.pipeline import HybridSearchService, ResumeIngestionPipeline
+from talentsift_ai.pipeline.reranker import calculate_competency_score
 from talentsift_ai.schemas import JobPostingCreate
 from talentsift_ai.settings import get_settings
 from talentsift_ai.web.db import get_pool
@@ -444,6 +445,20 @@ async def run_debate(
 
             job_description = payload.job_description or posting["description"]
             async with _create_mistral_client() as mistral:
+                query_embedding = await mistral.embed(job_description)
+                relevance_score = await repository.get_candidate_similarity(
+                    candidate_id=candidate.id,
+                    organization_id=organization_id,
+                    job_posting_id=posting_id,
+                    query_embedding=query_embedding,
+                )
+                competency_score = calculate_competency_score(candidate.model_dump())
+                pre_llm_score = (
+                    round(0.65 * relevance_score + 0.35 * competency_score, 4)
+                    if relevance_score is not None
+                    else None
+                )
+
                 graph = DebateGraph(mistral)
                 result = await graph.evaluate(
                     organization_id=organization_id,
@@ -451,10 +466,22 @@ async def run_debate(
                     cv_text=candidate.raw_cv_text,
                     job_description=job_description,
                 )
-                result_id = await repository.save_debate_result(result)
+                result_id = await repository.save_debate_result(
+                    result,
+                    job_posting_id=posting_id,
+                    pre_llm_score=pre_llm_score,
+                    relevance_score=relevance_score,
+                    competency_score=competency_score,
+                )
     except (OSError, TimeoutError, ValueError, asyncpg.PostgresError) as exc:
         raise HTTPException(status_code=503, detail=DATABASE_ERROR_MESSAGE) from exc
-    return {"id": result_id, **result.model_dump()}
+    return {
+        "id": result_id,
+        **result.model_dump(),
+        "pre_llm_score": pre_llm_score,
+        "relevance_score": relevance_score,
+        "competency_score": competency_score,
+    }
 
 
 async def _run_shortlist_debate(
@@ -462,9 +489,13 @@ async def _run_shortlist_debate(
     organization_id: int,
     posting_id: int,
     job_description: str,
-    candidate_ids: list[int],
+    candidates: list[dict[str, Any]],
 ) -> None:
     """Runs the Optimist/Pessimist/Arbitrator debate for a shortlist of candidates.
+
+    `candidates` are the already-ranked dicts from the pre-LLM stage (carrying
+    pre_llm_score/relevance_score/competency_score), so those scores are persisted
+    alongside the debate result without recomputing them.
 
     Scheduled via BackgroundTasks, so it runs after the HTTP response is sent and
     can't reuse the request-scoped Mistral client / DB connection (those are already
@@ -474,8 +505,11 @@ async def _run_shortlist_debate(
     semaphore = asyncio.Semaphore(SHORTLIST_CONCURRENCY)
 
     async def _evaluate(
-        candidate_id: int, mistral: MistralClient, repository: CandidateRepository
+        ranked_candidate: dict[str, Any],
+        mistral: MistralClient,
+        repository: CandidateRepository,
     ) -> None:
+        candidate_id = ranked_candidate["id"]
         async with semaphore:
             try:
                 candidate = await repository.get_candidate(
@@ -490,7 +524,13 @@ async def _run_shortlist_debate(
                     cv_text=candidate.raw_cv_text,
                     job_description=job_description,
                 )
-                await repository.save_debate_result(result)
+                await repository.save_debate_result(
+                    result,
+                    job_posting_id=posting_id,
+                    pre_llm_score=ranked_candidate.get("pre_llm_score"),
+                    relevance_score=ranked_candidate.get("relevance_score"),
+                    competency_score=ranked_candidate.get("competency_score"),
+                )
             except Exception:
                 logger.exception("Shortlist debate failed for candidate %s", candidate_id)
 
@@ -503,7 +543,7 @@ async def _run_shortlist_debate(
         ) as mistral:
             async with CandidateRepository(pool=get_pool()) as repository:
                 await asyncio.gather(
-                    *(_evaluate(cid, mistral, repository) for cid in candidate_ids)
+                    *(_evaluate(c, mistral, repository) for c in candidates)
                 )
     except Exception:
         logger.exception("Shortlist debate batch failed for posting %s", posting_id)
@@ -556,7 +596,9 @@ async def create_shortlist(
             cutoff = score(ranked[0]) * SHORTLIST_RELEVANCE_CUTOFF_RATIO
             shortlisted = [c for c in ranked if score(c) >= cutoff]
 
-            already_evaluated_ids = await repository.evaluated_candidate_ids(organization_id)
+            already_evaluated_ids = await repository.evaluated_candidate_ids(
+                organization_id, posting_id
+            )
             to_queue = [c for c in shortlisted if c["id"] not in already_evaluated_ids]
             skipped = [c for c in shortlisted if c["id"] in already_evaluated_ids]
     except (OSError, TimeoutError, ValueError, asyncpg.PostgresError) as exc:
@@ -568,7 +610,7 @@ async def create_shortlist(
             organization_id=organization_id,
             posting_id=posting_id,
             job_description=job_description,
-            candidate_ids=[c["id"] for c in to_queue],
+            candidates=to_queue,
         )
 
     return {
@@ -579,3 +621,41 @@ async def create_shortlist(
         "queued": [{"id": c["id"], "full_name": c["full_name"]} for c in to_queue],
         "already_evaluated": [{"id": c["id"], "full_name": c["full_name"]} for c in skipped],
     }
+
+
+class FinalizeRequest(BaseModel):
+    interview_slots: int = Field(ge=1, le=500)
+
+
+@router.post("/postings/{posting_id}/finalize")
+async def finalize_shortlist(
+    posting_id: int,
+    payload: FinalizeRequest,
+    session: dict[str, Any] = ORG_SESSION_DEPENDENCY,
+) -> dict[str, Any]:
+    """
+    Locks in the top `interview_slots` evaluated candidates as the final interview
+    shortlist and notifies every other applicant why they didn't move forward --
+    those who reached the LLM debate stage but weren't picked, and those who never
+    reached it at all (pre-LLM elimination).
+    """
+    organization_id = session["organization_id"]
+    try:
+        async with CandidateRepository(pool=get_pool()) as repository:
+            await _get_posting_or_404(repository, posting_id, organization_id)
+            evaluated_count = len(
+                await repository.evaluated_candidate_ids(organization_id, posting_id)
+            )
+            if evaluated_count == 0:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Sonuçlandırmadan önce en az bir aday için değerlendirme çalıştırın.",
+                )
+            summary = await repository.finalize_shortlist(
+                organization_id=organization_id,
+                job_posting_id=posting_id,
+                interview_slots=payload.interview_slots,
+            )
+    except (OSError, TimeoutError, ValueError, asyncpg.PostgresError) as exc:
+        raise HTTPException(status_code=503, detail=DATABASE_ERROR_MESSAGE) from exc
+    return {"status": "ok", **summary}
