@@ -1,3 +1,4 @@
+import logging
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -9,9 +10,12 @@ from pydantic import BaseModel, EmailStr, Field
 from talentsift_ai.db.repository import CandidateRepository
 from talentsift_ai.mistral_client import MistralClient, MistralClientError
 from talentsift_ai.pipeline import ResumeIngestionPipeline
+from talentsift_ai.pipeline.reranker import calculate_competency_score
 from talentsift_ai.settings import get_settings
 from talentsift_ai.web.db import get_pool
 from talentsift_ai.web.security import create_signed_session, verify_signed_session
+
+logger = logging.getLogger(__name__)
 
 CANDIDATE_SESSION_COOKIE = "talentsift_candidate_session"
 DATABASE_ERROR_MESSAGE = (
@@ -223,6 +227,55 @@ async def get_job(
     return {"job": posting}
 
 
+async def _score_application_against_posting(
+    *,
+    repository: CandidateRepository,
+    candidate_id: int,
+    organization_id: int,
+    job_posting_id: int,
+    posting_description: str,
+    candidate_profile: dict[str, Any],
+) -> None:
+    """
+    Scores a single new application against its posting immediately, so the pre-LLM
+    view never shows a stale/missing score for a fresh applicant. The posting's
+    description embedding is computed once and cached on job_postings -- every
+    subsequent application to the same posting reuses it (no Mistral call at all).
+    """
+    try:
+        posting_embedding = await repository.get_posting_embedding(job_posting_id)
+        if posting_embedding is None:
+            async with _create_mistral_client() as mistral:
+                posting_embedding = await mistral.embed(posting_description)
+            await repository.set_posting_embedding(job_posting_id, posting_embedding)
+
+        relevance_score = await repository.get_candidate_similarity(
+            candidate_id=candidate_id,
+            organization_id=organization_id,
+            job_posting_id=job_posting_id,
+            query_embedding=posting_embedding,
+        )
+        competency_score = calculate_competency_score(candidate_profile)
+        pre_llm_score = (
+            round(0.65 * relevance_score + 0.35 * competency_score, 4)
+            if relevance_score is not None
+            else None
+        )
+        await repository.upsert_application_score(
+            job_posting_id=job_posting_id,
+            candidate_id=candidate_id,
+            relevance_score=relevance_score,
+            competency_score=competency_score,
+            pre_llm_score=pre_llm_score,
+        )
+    except (MistralClientError, OSError, TimeoutError, asyncpg.PostgresError):
+        # Scoring is a best-effort enhancement -- a failure here must never fail the
+        # application itself. A later "sırala"/"kısa liste" run will fill the gap.
+        logger.exception(
+            "Pre-LLM scoring failed for candidate %s on posting %s", candidate_id, job_posting_id
+        )
+
+
 @router.post("/jobs/{job_posting_id}/apply")
 async def apply_for_job(
     job_posting_id: int,
@@ -251,6 +304,14 @@ async def apply_for_job(
                 job_posting_id=job_posting_id,
                 candidate_id=candidate_id,
                 organization_id=job_item["organization_id"],
+            )
+            await _score_application_against_posting(
+                repository=repository,
+                candidate_id=candidate_id,
+                organization_id=job_item["organization_id"],
+                job_posting_id=job_posting_id,
+                posting_description=job_item["description"],
+                candidate_profile=profile,
             )
             return {
                 "status": "ok",

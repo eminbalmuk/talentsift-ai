@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import { Award, CalendarClock, CheckCircle2, Flag, ListChecks, RotateCcw, Search, TrendingUp, Upload, Users } from "lucide-react";
+import { Award, CalendarClock, CheckCircle2, Flag, ListChecks, PauseCircle, PlayCircle, RotateCcw, Search, TrendingUp, Upload, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -22,7 +22,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { apiGet, apiPost, apiUpload, ApiError } from "@/lib/api";
+import { apiGet, apiPatch, apiPost, apiUpload, ApiError } from "@/lib/api";
 import type {
   Candidate,
   FinalizeResponse,
@@ -63,6 +63,7 @@ export default function PostingDetailPage() {
   const [shortlistTarget, setShortlistTarget] = useState<number | null>(null);
   const [finalizing, setFinalizing] = useState(false);
   const [resetting, setResetting] = useState(false);
+  const [togglingStatus, setTogglingStatus] = useState(false);
 
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -226,6 +227,20 @@ export default function PostingDetailPage() {
     }
   }
 
+  async function handleToggleStatus() {
+    if (!posting) return;
+    setTogglingStatus(true);
+    try {
+      await apiPatch(`/api/org/postings/${postingId}/status`, { is_active: !posting.is_active });
+      toast.success(`İlan ${!posting.is_active ? "yayına alındı" : "yayından kaldırıldı"}.`);
+      await loadPosting();
+    } catch (error) {
+      toast.error(error instanceof ApiError ? error.message : "İlan durumu güncellenemedi.");
+    } finally {
+      setTogglingStatus(false);
+    }
+  }
+
   useEffect(() => {
     if (shortlistTarget === null) return;
     let cancelled = false;
@@ -302,6 +317,8 @@ export default function PostingDetailPage() {
   }
 
   const deadline = formatDate(posting.deadline_at);
+  const showScores =
+    semantic || (candidates?.some((c) => (c as RankedCandidate).pre_llm_score != null) ?? false);
   const averageScore =
     results && results.length > 0
       ? (results.reduce((sum, r) => sum + Number(r.ranking_score), 0) / results.length).toFixed(1)
@@ -315,16 +332,44 @@ export default function PostingDetailPage() {
     <div className="flex flex-col gap-6">
       <Card className="border-border/60">
         <CardContent className="flex flex-col gap-3 px-5 py-5">
-          <div>
-            <h1 className="text-xl font-semibold tracking-tight text-foreground">
-              {posting.title}
-            </h1>
-            {deadline ? (
-              <span className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground">
-                <CalendarClock className="h-3.5 w-3.5" />
-                Son başvuru: {deadline}
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <h1 className="text-xl font-semibold tracking-tight text-foreground">
+                {posting.title}
+              </h1>
+              {deadline ? (
+                <span className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground">
+                  <CalendarClock className="h-3.5 w-3.5" />
+                  Son başvuru: {deadline}
+                </span>
+              ) : null}
+            </div>
+            <div className="flex shrink-0 flex-col items-start gap-1 sm:items-end">
+              <Button
+                onClick={handleToggleStatus}
+                disabled={togglingStatus}
+                variant={posting.is_active ? "outline" : "default"}
+                size="sm"
+                className="gap-1.5"
+              >
+                {posting.is_active ? (
+                  <>
+                    <PauseCircle className="h-3.5 w-3.5" />
+                    Yayından kaldır
+                  </>
+                ) : (
+                  <>
+                    <PlayCircle className="h-3.5 w-3.5" />
+                    Yayına al
+                  </>
+                )}
+              </Button>
+              <span className="text-[11px] text-muted-foreground">
+                {posting.is_active
+                  ? "Yayında -- adaylar başvurabiliyor."
+                  : "Pasif -- yeni başvuru alınmıyor."}
               </span>
-            ) : null}
+            </div>
           </div>
           <p className="whitespace-pre-wrap text-sm text-muted-foreground">
             {posting.description}
@@ -419,7 +464,7 @@ export default function PostingDetailPage() {
                   <TableHead>GANO</TableHead>
                   <TableHead className="hidden md:table-cell">Sınıf</TableHead>
                   <TableHead className="hidden md:table-cell">Deneyim</TableHead>
-                  {semantic ? (
+                  {showScores ? (
                     <>
                       <TableHead>Pre-LLM Puanı</TableHead>
                       <TableHead className="hidden lg:table-cell">İlan Uyumu</TableHead>
@@ -451,16 +496,16 @@ export default function PostingDetailPage() {
                       <TableCell className="hidden md:table-cell">
                         {candidate.experience_years} yıl
                       </TableCell>
-                      {semantic ? (
+                      {showScores ? (
                         <>
                           <TableCell className="font-semibold text-primary">
-                            {(ranked.pre_llm_score ?? ranked.similarity).toFixed(3)}
+                            {ranked.pre_llm_score != null ? ranked.pre_llm_score.toFixed(3) : "—"}
                           </TableCell>
                           <TableCell className="hidden text-muted-foreground lg:table-cell">
-                            {(ranked.relevance_score ?? ranked.similarity).toFixed(3)}
+                            {ranked.relevance_score != null ? ranked.relevance_score.toFixed(3) : "—"}
                           </TableCell>
                           <TableCell className="hidden text-muted-foreground lg:table-cell">
-                            {(ranked.competency_score ?? 0).toFixed(3)}
+                            {ranked.competency_score != null ? ranked.competency_score.toFixed(3) : "—"}
                           </TableCell>
                         </>
                       ) : null}
@@ -469,7 +514,7 @@ export default function PostingDetailPage() {
                 })}
                 {candidates?.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={semantic ? 8 : 5} className="py-10 text-center text-sm text-muted-foreground">
+                    <TableCell colSpan={showScores ? 8 : 5} className="py-10 text-center text-sm text-muted-foreground">
                       Henüz CV yüklenmedi veya kriterlere uyan aday yok.
                     </TableCell>
                   </TableRow>

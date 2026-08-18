@@ -49,6 +49,12 @@ export interface Candidate {
   source_path: string | null;
   created_at?: string;
   raw_cv_text?: string;
+  // Persisted the moment the candidate applies (posting embedding is cached, so this
+  // is free after the first applicant) or after an org runs "sırala"/"kısa liste" --
+  // present here so the "Adaylar" tab survives a page refresh.
+  pre_llm_score?: number | null;
+  relevance_score?: number | null;
+  competency_score?: number | null;
 }
 
 export interface RankedCandidate extends Candidate {

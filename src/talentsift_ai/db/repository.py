@@ -458,6 +458,80 @@ class CandidateRepository:
             )
         return JobPosting(id=row["id"], is_active=row["is_active"], **posting.model_dump())
 
+    async def get_posting_embedding(self, job_posting_id: int) -> list[float] | None:
+        await self._ensure_connected()
+        async with self._pool.acquire() as connection:
+            value = await connection.fetchval(
+                "SELECT description_embedding FROM job_postings WHERE id = $1", job_posting_id
+            )
+        if value is None:
+            return None
+        # pgvector comes back as a "[0.1,0.2,...]" string via asyncpg (no native codec).
+        return [float(x) for x in value.strip("[]").split(",")]
+
+    async def set_posting_embedding(self, job_posting_id: int, embedding: list[float]) -> None:
+        await self._ensure_connected()
+        async with self._pool.acquire() as connection:
+            await connection.execute(
+                "UPDATE job_postings SET description_embedding = $2 WHERE id = $1",
+                job_posting_id,
+                to_pgvector(embedding),
+            )
+
+    async def bulk_upsert_application_scores(
+        self, *, job_posting_id: int, scored_candidates: list[dict[str, Any]]
+    ) -> None:
+        """scored_candidates: dicts with id/relevance_score/competency_score/pre_llm_score,
+        as returned by PreLLMReranker.rerank() -- persists every ranked candidate's score,
+        not just the ones that go on to the LLM debate stage."""
+        if not scored_candidates:
+            return
+        await self._ensure_connected()
+        async with self._pool.acquire() as connection:
+            await connection.executemany(
+                """
+                UPDATE job_applications
+                SET relevance_score = $3, competency_score = $4, pre_llm_score = $5,
+                    score_computed_at = CURRENT_TIMESTAMP
+                WHERE job_posting_id = $1 AND candidate_id = $2
+                """,
+                [
+                    (
+                        job_posting_id,
+                        c["id"],
+                        c.get("relevance_score"),
+                        c.get("competency_score"),
+                        c.get("pre_llm_score"),
+                    )
+                    for c in scored_candidates
+                ],
+            )
+
+    async def upsert_application_score(
+        self,
+        *,
+        job_posting_id: int,
+        candidate_id: int,
+        relevance_score: float | None,
+        competency_score: float | None,
+        pre_llm_score: float | None,
+    ) -> None:
+        await self._ensure_connected()
+        async with self._pool.acquire() as connection:
+            await connection.execute(
+                """
+                UPDATE job_applications
+                SET relevance_score = $3, competency_score = $4, pre_llm_score = $5,
+                    score_computed_at = CURRENT_TIMESTAMP
+                WHERE job_posting_id = $1 AND candidate_id = $2
+                """,
+                job_posting_id,
+                candidate_id,
+                relevance_score,
+                competency_score,
+                pre_llm_score,
+            )
+
     # Candidates for a posting can live in either of two tables: the legacy `candidates`
     # table (organization uploads CVs directly) or `job_applications` (candidate-portal
     # applications). Correlated subqueries avoid the row-multiplication that joining both
@@ -616,7 +690,8 @@ class CandidateRepository:
 
         app_sql = f"""
             SELECT p.candidate_id AS id, u.full_name, p.university, p.gpa, p.current_class,
-                   p.experience_years, p.skills, p.source_path, a.applied_at AS created_at
+                   p.experience_years, p.skills, p.source_path, a.applied_at AS created_at,
+                   a.relevance_score, a.competency_score, a.pre_llm_score
             FROM job_applications a
             JOIN candidate_profiles p ON p.candidate_id = a.candidate_id
             JOIN candidate_users u ON u.id = a.candidate_id

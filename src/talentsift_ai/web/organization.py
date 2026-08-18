@@ -374,6 +374,12 @@ async def search_candidates(
                     min_experience_years=payload.min_experience_years,
                     limit=payload.limit,
                 )
+            # Persist every ranked candidate's pre-LLM score (not just the ones that go
+            # on to an LLM debate) so the "Adaylar" tab survives a page refresh instead
+            # of only holding this search's result ephemerally in frontend state.
+            await repository.bulk_upsert_application_scores(
+                job_posting_id=posting_id, scored_candidates=results
+            )
     except (OSError, TimeoutError, ValueError, asyncpg.PostgresError) as exc:
         raise HTTPException(status_code=503, detail=DATABASE_ERROR_MESSAGE) from exc
     return {"candidates": results}
@@ -600,6 +606,9 @@ async def create_shortlist(
                     min_experience_years=payload.min_experience_years,
                     limit=payload.candidate_count * SHORTLIST_FUNNEL_MULTIPLIER,
                 )
+            await repository.bulk_upsert_application_scores(
+                job_posting_id=posting_id, scored_candidates=ranked
+            )
 
             if not ranked:
                 return {
