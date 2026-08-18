@@ -127,6 +127,29 @@ def add_organization(
     run_async(_provision())
 
 
+@admin_app.command("reset-organization-password")
+def reset_organization_password(
+    organization_id: Annotated[int, typer.Option(help="Organization ID to reset the login password for.")],
+) -> None:
+    """Reset an organization's password hash under the current PRODUCT_KEY_PEPPER."""
+
+    async def _reset() -> None:
+        settings = get_settings()
+        async with CandidateRepository(settings.database_url) as repository:
+            result = await repository.reset_organization_password(
+                organization_id=organization_id,
+                credential_pepper=settings.product_key_pepper,
+            )
+            if result is None:
+                raise typer.BadParameter(f"No organization user found for organization {organization_id}.")
+            console.print("[green]Password reset[/green]")
+            console.print(f"Username: {result['username']}")
+            console.print(f"New password: {result['password']}")
+            console.print("Store this password now. Only its hash is saved in the database.")
+
+    run_async(_reset())
+
+
 @auth_app.command("login-check")
 def login_check(
     username: Annotated[str, typer.Option(help="Organization username.")],

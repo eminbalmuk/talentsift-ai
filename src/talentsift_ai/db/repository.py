@@ -405,6 +405,30 @@ class CandidateRepository:
             return None
         return {**dict(row), "license_key": license_key}
 
+    async def reset_organization_password(
+        self,
+        *,
+        organization_id: int,
+        credential_pepper: str = "",
+    ) -> dict[str, Any] | None:
+        await self._ensure_connected()
+        new_password = generate_password()
+        async with self._pool.acquire() as connection:
+            row = await connection.fetchrow(
+                """
+                UPDATE organization_users
+                SET password_hash = $2, password_prefix = $3
+                WHERE organization_id = $1
+                RETURNING username
+                """,
+                organization_id,
+                hash_secret(new_password, pepper=credential_pepper),
+                secret_public_prefix(new_password),
+            )
+        if row is None:
+            return None
+        return {"username": row["username"], "password": new_password}
+
     async def delete_organization(self, organization_id: int) -> bool:
         """Deletes an organization and everything it owns (users, postings, applications,
         legacy candidates, debate results -- all ON DELETE CASCADE). Candidate portal
@@ -458,9 +482,15 @@ class CandidateRepository:
         async with self._pool.acquire() as connection:
             row = await connection.fetchrow(
                 """
-                SELECT id, organization_id, title, description, deadline_at, is_active, created_at
-                FROM job_postings
-                WHERE id = $1 AND organization_id = $2
+                SELECT p.id, p.organization_id, p.title, p.description, p.deadline_at,
+                       p.is_active, p.created_at,
+                       COUNT(DISTINCT c.id) AS candidate_count,
+                       COUNT(DISTINCT d.id) AS debate_count
+                FROM job_postings p
+                LEFT JOIN candidates c ON c.job_posting_id = p.id
+                LEFT JOIN debate_results d ON d.candidate_id = c.id
+                WHERE p.id = $1 AND p.organization_id = $2
+                GROUP BY p.id
                 """,
                 posting_id,
                 organization_id,

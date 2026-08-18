@@ -234,6 +234,20 @@ async def list_postings(session: dict[str, Any] = ORG_SESSION_DEPENDENCY) -> dic
     return {"postings": rows}
 
 
+@router.get("/postings/{posting_id}")
+async def get_posting(
+    posting_id: int,
+    session: dict[str, Any] = ORG_SESSION_DEPENDENCY,
+) -> dict[str, Any]:
+    organization_id = session["organization_id"]
+    try:
+        async with CandidateRepository(pool=get_pool()) as repository:
+            posting = await _get_posting_or_404(repository, posting_id, organization_id)
+    except (OSError, TimeoutError, ValueError, asyncpg.PostgresError) as exc:
+        raise HTTPException(status_code=503, detail=DATABASE_ERROR_MESSAGE) from exc
+    return {"posting": posting}
+
+
 @router.delete("/postings/{posting_id}")
 async def delete_posting(
     posting_id: int,
