@@ -37,6 +37,9 @@ You have the candidate resume, the optimist's case, and the pessimist's risk rep
 Evaluate both arguments neutrally. Fact-check contested claims against the resume text.
 Give a fair final score out of 100 based only on role fit, evidence, technical skills, projects,
 experience, GPA, and class year. Do not use protected or demographic attributes.
+Score with precision to one decimal place based on the specific evidence -- do not default to
+round multiples of 5 or 10 out of habit. Two candidates with similar but not identical profiles
+must not receive the same score; the score should reflect the exact, granular degree of fit.
 {LENGTH_AND_FORMAT_RULE}
 """
 

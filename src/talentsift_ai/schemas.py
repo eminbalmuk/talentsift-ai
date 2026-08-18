@@ -55,7 +55,13 @@ class AgentAnalysis(BaseModel):
 
 
 class ArbitratorReport(BaseModel):
-    final_score: confloat(ge=0, le=100)
+    final_score: confloat(ge=0, le=100) = Field(
+        description=(
+            "A precise score with one decimal place (e.g. 72.3, 84.7, 91.0). Do NOT default "
+            "to round multiples of 5 or 10 -- reflect the exact, specific degree of fit. Two "
+            "candidates with similar but not identical profiles must receive different scores."
+        ),
+    )
     rationale: str = Field(
         description=(
             "2-4 concise sentences of plain prose explaining the final score. No markdown "

@@ -783,7 +783,7 @@ class CandidateRepository:
                     FROM debate_results d
                     JOIN job_applications a ON a.candidate_id = d.candidate_id
                     WHERE d.organization_id = $1 AND a.job_posting_id = $2
-                    ORDER BY d.final_score DESC, d.created_at DESC
+                    ORDER BY d.final_score DESC, d.pre_llm_score DESC NULLS LAST, d.created_at DESC
                     """,
                     organization_id,
                     job_posting_id,
@@ -1218,7 +1218,7 @@ class CandidateRepository:
                 JOIN candidate_profiles p ON p.candidate_id = a.candidate_id
                 JOIN candidate_users u ON u.id = a.candidate_id
                 WHERE d.organization_id = $1 AND a.job_posting_id = $2
-                ORDER BY d.final_score DESC, d.created_at DESC
+                ORDER BY d.final_score DESC, d.pre_llm_score DESC NULLS LAST, d.created_at DESC
                 LIMIT $3
                 """,
                 organization_id,
@@ -1237,7 +1237,7 @@ class CandidateRepository:
                 FROM debate_results d
                 JOIN candidates c ON c.id = d.candidate_id
                 WHERE d.organization_id = $1 AND c.job_posting_id = $2
-                ORDER BY d.final_score DESC, d.created_at DESC
+                ORDER BY d.final_score DESC, d.pre_llm_score DESC NULLS LAST, d.created_at DESC
                 LIMIT $3
                 """,
                 organization_id,
