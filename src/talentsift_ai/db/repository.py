@@ -458,19 +458,34 @@ class CandidateRepository:
             )
         return JobPosting(id=row["id"], is_active=row["is_active"], **posting.model_dump())
 
+    # Candidates for a posting can live in either of two tables: the legacy `candidates`
+    # table (organization uploads CVs directly) or `job_applications` (candidate-portal
+    # applications). Correlated subqueries avoid the row-multiplication that joining both
+    # sources directly would cause when combined with a third join for debate_results.
+    _JOB_POSTING_COUNT_COLUMNS = """
+                       (
+                           (SELECT COUNT(*) FROM candidates c WHERE c.job_posting_id = p.id)
+                           + (SELECT COUNT(*) FROM job_applications a WHERE a.job_posting_id = p.id)
+                       ) AS candidate_count,
+                       (
+                           (SELECT COUNT(*) FROM debate_results d
+                            JOIN candidates c ON c.id = d.candidate_id
+                            WHERE c.job_posting_id = p.id AND d.organization_id = p.organization_id)
+                           + (SELECT COUNT(*) FROM debate_results d
+                              JOIN job_applications a ON a.candidate_id = d.candidate_id
+                              WHERE a.job_posting_id = p.id AND d.organization_id = p.organization_id)
+                       ) AS debate_count
+    """
+
     async def list_job_postings(self, organization_id: int) -> list[dict[str, Any]]:
         await self._ensure_connected()
         async with self._pool.acquire() as connection:
             rows = await connection.fetch(
-                """
+                f"""
                 SELECT p.id, p.title, p.description, p.deadline_at, p.is_active, p.created_at,
-                       COUNT(DISTINCT c.id) AS candidate_count,
-                       COUNT(DISTINCT d.id) AS debate_count
+                       {self._JOB_POSTING_COUNT_COLUMNS}
                 FROM job_postings p
-                LEFT JOIN candidates c ON c.job_posting_id = p.id
-                LEFT JOIN debate_results d ON d.candidate_id = c.id
                 WHERE p.organization_id = $1
-                GROUP BY p.id
                 ORDER BY p.created_at DESC
                 """,
                 organization_id,
@@ -481,16 +496,12 @@ class CandidateRepository:
         await self._ensure_connected()
         async with self._pool.acquire() as connection:
             row = await connection.fetchrow(
-                """
+                f"""
                 SELECT p.id, p.organization_id, p.title, p.description, p.deadline_at,
                        p.is_active, p.created_at,
-                       COUNT(DISTINCT c.id) AS candidate_count,
-                       COUNT(DISTINCT d.id) AS debate_count
+                       {self._JOB_POSTING_COUNT_COLUMNS}
                 FROM job_postings p
-                LEFT JOIN candidates c ON c.job_posting_id = p.id
-                LEFT JOIN debate_results d ON d.candidate_id = c.id
                 WHERE p.id = $1 AND p.organization_id = $2
-                GROUP BY p.id
                 """,
                 posting_id,
                 organization_id,
