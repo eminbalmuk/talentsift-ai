@@ -331,9 +331,16 @@ async def get_candidate(
             if candidate is None:
                 raise HTTPException(status_code=404, detail="Candidate not found.")
             debate = await repository.latest_debate_result(candidate_id, organization_id)
+            application_status = await repository.get_application_status(
+                candidate_id, organization_id, posting_id
+            )
     except (OSError, TimeoutError, ValueError, asyncpg.PostgresError) as exc:
         raise HTTPException(status_code=503, detail=DATABASE_ERROR_MESSAGE) from exc
-    return {"candidate": candidate.model_dump(exclude={"cv_embedding"}), "debate": debate}
+    return {
+        "candidate": candidate.model_dump(exclude={"cv_embedding"}),
+        "debate": debate,
+        "application_status": application_status,
+    }
 
 
 @router.post("/postings/{posting_id}/candidates/search")

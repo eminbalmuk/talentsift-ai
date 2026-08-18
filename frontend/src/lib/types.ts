@@ -70,6 +70,9 @@ export interface DebateResult {
   arbitrator_rationale: string;
   is_selected?: boolean;
   created_at?: string;
+  pre_llm_score?: number | null;
+  relevance_score?: number | null;
+  competency_score?: number | null;
 }
 
 export interface CandidateUser {
@@ -121,6 +124,35 @@ export interface TopResult {
   final_score: number;
   arbitrator_rationale: string;
   is_selected: boolean;
+  pre_llm_score?: number | null;
+  relevance_score?: number | null;
+  competency_score?: number | null;
+  application_status?: "applied" | "selected" | "rejected" | null;
+}
+
+export interface FinalizeResponse {
+  status: string;
+  selected_count: number;
+  rejected_post_llm_count: number;
+  rejected_pre_llm_count: number;
+  notifications_sent: number;
+}
+
+export interface CandidateNotification {
+  id: number;
+  type: "selected" | "rejected_post_llm" | "rejected_pre_llm";
+  title: string;
+  message: string;
+  is_read: boolean;
+  created_at: string;
+  job_title: string | null;
+  organization_name: string | null;
+  optimist_score: number | null;
+  optimist_arguments: string | null;
+  pessimist_score: number | null;
+  pessimist_arguments: string | null;
+  final_score: number | null;
+  arbitrator_rationale: string | null;
 }
 
 export interface ShortlistCandidateRef {

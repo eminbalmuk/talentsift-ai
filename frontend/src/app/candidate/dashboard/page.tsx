@@ -5,51 +5,69 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import {
+  Bell,
   Briefcase,
   CheckCircle2,
+  ChevronDown,
+  ChevronUp,
   Clock,
   FileText,
   Filter,
+  Gavel,
   GraduationCap,
   LogOut,
   Search,
   Send,
   Sparkles,
+  ThumbsDown,
+  ThumbsUp,
   Trash2,
   UploadCloud,
   User,
   Zap,
 } from "lucide-react";
 import { LogoFull } from "@/components/logo";
+import { Markdown } from "@/components/markdown";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { apiDelete, apiGet, apiPost, ApiError } from "@/lib/api";
-import type { CandidateProfile, JobApplication, OpenJobPosting } from "@/lib/types";
+import type {
+  CandidateNotification,
+  CandidateProfile,
+  JobApplication,
+  OpenJobPosting,
+} from "@/lib/types";
 
 export default function CandidateDashboardPage() {
   const router = useRouter();
   const [profile, setProfile] = useState<CandidateProfile | null>(null);
   const [jobs, setJobs] = useState<OpenJobPosting[]>([]);
   const [applications, setApplications] = useState<JobApplication[]>([]);
+  const [notifications, setNotifications] = useState<CandidateNotification[]>([]);
+  const [expandedNotificationId, setExpandedNotificationId] = useState<number | null>(null);
   const [uploading, setUploading] = useState(false);
   const [applyingJobId, setApplyingJobId] = useState<number | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
 
   const loadData = useCallback(async () => {
     try {
-      const [profData, jobsData, appsData] = await Promise.all([
+      const [profData, jobsData, appsData, notifData] = await Promise.all([
         apiGet<CandidateProfile>("/api/candidate/profile").catch(() => null),
         apiGet<{ jobs: OpenJobPosting[] }>("/api/candidate/jobs").catch(() => ({ jobs: [] })),
         apiGet<{ applications: JobApplication[] }>("/api/candidate/applications").catch(() => ({
           applications: [],
         })),
+        apiGet<{ notifications: CandidateNotification[] }>("/api/candidate/notifications").catch(
+          () => ({ notifications: [] }),
+        ),
       ]);
       if (profData) setProfile(profData);
       setJobs(jobsData.jobs);
       setApplications(appsData.applications);
+      setNotifications(notifData.notifications);
     } catch {
       toast.error("Veriler yüklenirken bir hata oluştu.");
     }
@@ -133,6 +151,21 @@ export default function CandidateDashboardPage() {
     }
   }
 
+  async function handleToggleNotification(notification: CandidateNotification) {
+    const opening = expandedNotificationId !== notification.id;
+    setExpandedNotificationId(opening ? notification.id : null);
+    if (opening && !notification.is_read) {
+      try {
+        await apiPost(`/api/candidate/notifications/${notification.id}/read`, {});
+        setNotifications((prev) =>
+          prev.map((n) => (n.id === notification.id ? { ...n, is_read: true } : n)),
+        );
+      } catch {
+        // Non-critical -- read state will just re-sync on next load.
+      }
+    }
+  }
+
   async function handleLogout() {
     try {
       await apiPost("/api/candidate/logout", {});
@@ -144,6 +177,7 @@ export default function CandidateDashboardPage() {
   }
 
   const appliedJobIds = new Set(applications.map((a) => a.job_posting_id));
+  const unreadNotificationCount = notifications.filter((n) => !n.is_read).length;
 
   // Filter jobs by search query
   const filteredJobs = jobs.filter((job) => {
@@ -215,7 +249,7 @@ export default function CandidateDashboardPage() {
 
         {/* Tabs Container */}
         <Tabs defaultValue="jobs" className="w-full space-y-6">
-          <TabsList className="grid w-full grid-cols-3 max-w-lg mx-auto sm:mx-0">
+          <TabsList className="grid w-full grid-cols-4 max-w-xl mx-auto sm:mx-0">
             <TabsTrigger value="jobs" className="gap-1.5 truncate px-1 text-xs sm:text-sm">
               <Briefcase className="h-3.5 w-3.5 shrink-0" />
               <span className="truncate">
@@ -234,6 +268,15 @@ export default function CandidateDashboardPage() {
               <span className="truncate">
                 <span className="sm:hidden">Başvurular</span>
                 <span className="hidden sm:inline">Başvurularım ({applications.length})</span>
+              </span>
+            </TabsTrigger>
+            <TabsTrigger value="notifications" className="gap-1.5 truncate px-1 text-xs sm:text-sm">
+              <Bell className="h-3.5 w-3.5 shrink-0" />
+              <span className="truncate">
+                <span className="sm:hidden">Bildirimler</span>
+                <span className="hidden sm:inline">
+                  Bildirimler{unreadNotificationCount > 0 ? ` (${unreadNotificationCount})` : ""}
+                </span>
               </span>
             </TabsTrigger>
           </TabsList>
@@ -459,20 +502,144 @@ export default function CandidateDashboardPage() {
                             <Clock className="h-3 w-3" />
                             {new Date(app.applied_at).toLocaleDateString("tr-TR")}
                           </span>
-                          <Badge variant="outline" className="text-xs capitalize bg-primary/10 text-primary border-primary/20">
-                            {app.status === "applied" ? "Başvuruldu" : app.status}
-                          </Badge>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => handleWithdraw(app.job_posting_id)}
-                            className="h-7 text-xs text-destructive hover:text-destructive hover:bg-destructive/10"
+                          <Badge
+                            variant="outline"
+                            className={`text-xs capitalize ${
+                              app.status === "selected"
+                                ? "bg-emerald-500/10 text-emerald-600 border-emerald-500/20"
+                                : app.status === "rejected"
+                                  ? "bg-muted text-muted-foreground border-border"
+                                  : "bg-primary/10 text-primary border-primary/20"
+                            }`}
                           >
-                            Geri Çek
-                          </Button>
+                            {app.status === "applied"
+                              ? "Başvuruldu"
+                              : app.status === "selected"
+                                ? "Mülakata seçildiniz"
+                                : app.status === "rejected"
+                                  ? "Sonuçlandı"
+                                  : app.status}
+                          </Badge>
+                          {app.status === "applied" ? (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleWithdraw(app.job_posting_id)}
+                              className="h-7 text-xs text-destructive hover:text-destructive hover:bg-destructive/10"
+                            >
+                              Geri Çek
+                            </Button>
+                          ) : null}
                         </div>
                       </div>
                     ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          {/* Notifications Tab */}
+          <TabsContent value="notifications" className="space-y-4">
+            <Card className="border-border/60 shadow-sm">
+              <CardHeader>
+                <CardTitle className="text-base">Bildirimler</CardTitle>
+                <CardDescription className="text-xs">
+                  Başvurularınızın sonuçları ve değerlendirme raporları burada görünür.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                {notifications.length === 0 ? (
+                  <p className="text-xs text-muted-foreground py-8 text-center">Henüz bir bildiriminiz yok.</p>
+                ) : (
+                  <div className="divide-y divide-border/60">
+                    {notifications.map((notification) => {
+                      const isExpanded = expandedNotificationId === notification.id;
+                      const hasDebateReport = notification.final_score != null;
+                      const tone =
+                        notification.type === "selected"
+                          ? "bg-emerald-500/10 text-emerald-600 border-emerald-500/20"
+                          : "bg-muted text-muted-foreground border-border";
+                      return (
+                        <div key={notification.id} className="py-3.5">
+                          <button
+                            type="button"
+                            onClick={() => handleToggleNotification(notification)}
+                            className="w-full flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-left"
+                          >
+                            <div className="flex items-start gap-2">
+                              {!notification.is_read ? (
+                                <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-primary" />
+                              ) : (
+                                <span className="mt-1.5 h-1.5 w-1.5 shrink-0" />
+                              )}
+                              <div>
+                                <p className="text-sm font-semibold text-foreground">{notification.title}</p>
+                                <p className="text-xs text-muted-foreground mt-0.5">
+                                  {notification.job_title ?? "TalentSift"}
+                                  {notification.organization_name ? ` · ${notification.organization_name}` : ""}
+                                </p>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2 self-start sm:self-auto shrink-0">
+                              <span className="text-[11px] text-muted-foreground flex items-center gap-1">
+                                <Clock className="h-3 w-3" />
+                                {new Date(notification.created_at).toLocaleDateString("tr-TR")}
+                              </span>
+                              <Badge variant="outline" className={`text-[11px] ${tone}`}>
+                                {notification.type === "selected" ? "Mülakata seçildiniz" : "Sonuçlandı"}
+                              </Badge>
+                              {hasDebateReport ? (
+                                isExpanded ? (
+                                  <ChevronUp className="h-4 w-4 text-muted-foreground" />
+                                ) : (
+                                  <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                                )
+                              ) : null}
+                            </div>
+                          </button>
+                          <p className="text-xs text-muted-foreground mt-2 leading-relaxed">
+                            {notification.message}
+                          </p>
+
+                          {isExpanded && hasDebateReport ? (
+                            <div className="mt-4 space-y-4 rounded-lg border border-border/60 bg-muted/20 p-4">
+                              <div className="grid gap-3 sm:grid-cols-3 text-center">
+                                <div className="rounded-md bg-background py-2.5">
+                                  <ThumbsUp className="h-3.5 w-3.5 text-emerald-500 mx-auto mb-1" />
+                                  <div className="text-[11px] text-muted-foreground">İyimser</div>
+                                  <div className="text-sm font-semibold">{notification.optimist_score}</div>
+                                </div>
+                                <div className="rounded-md bg-background py-2.5">
+                                  <ThumbsDown className="h-3.5 w-3.5 text-red-500 mx-auto mb-1" />
+                                  <div className="text-[11px] text-muted-foreground">Kötümser</div>
+                                  <div className="text-sm font-semibold">{notification.pessimist_score}</div>
+                                </div>
+                                <div className="rounded-md bg-primary/5 py-2.5">
+                                  <Gavel className="h-3.5 w-3.5 text-primary mx-auto mb-1" />
+                                  <div className="text-[11px] text-muted-foreground">Nihai puan</div>
+                                  <div className="text-sm font-semibold">
+                                    {Number(notification.final_score).toFixed(1)}
+                                  </div>
+                                </div>
+                              </div>
+                              <div>
+                                <p className="text-xs font-semibold text-foreground mb-1">Hakem gerekçesi</p>
+                                <Markdown>{notification.arbitrator_rationale ?? ""}</Markdown>
+                              </div>
+                              <div>
+                                <p className="text-xs font-semibold text-foreground mb-1">İyimser ajanın argümanları</p>
+                                <Markdown>{notification.optimist_arguments ?? ""}</Markdown>
+                              </div>
+                              <div>
+                                <p className="text-xs font-semibold text-foreground mb-1">Kötümser ajanın riskleri</p>
+                                <Markdown>{notification.pessimist_arguments ?? ""}</Markdown>
+                              </div>
+                            </div>
+                          ) : null}
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
               </CardContent>

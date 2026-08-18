@@ -846,6 +846,21 @@ class CandidateRepository:
             )
         return [dict(row) for row in rows]
 
+    async def get_application_status(
+        self, candidate_id: int, organization_id: int, job_posting_id: int
+    ) -> str | None:
+        await self._ensure_connected()
+        async with self._pool.acquire() as connection:
+            return await connection.fetchval(
+                """
+                SELECT status FROM job_applications
+                WHERE candidate_id = $1 AND organization_id = $2 AND job_posting_id = $3
+                """,
+                candidate_id,
+                organization_id,
+                job_posting_id,
+            )
+
     async def mark_notification_read(self, notification_id: int, candidate_id: int) -> bool:
         await self._ensure_connected()
         async with self._pool.acquire() as connection:

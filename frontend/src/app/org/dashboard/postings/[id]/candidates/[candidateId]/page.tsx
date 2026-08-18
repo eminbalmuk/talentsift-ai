@@ -3,7 +3,8 @@
 import { useParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
-import { Gavel, GraduationCap, ThumbsDown, ThumbsUp } from "lucide-react";
+import { Gavel, GraduationCap, Layers, Search, ThumbsDown, ThumbsUp, Wrench } from "lucide-react";
+import { Markdown } from "@/components/markdown";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -19,17 +20,21 @@ export default function CandidateDetailPage() {
 
   const [candidate, setCandidate] = useState<Candidate | null>(null);
   const [debate, setDebate] = useState<DebateResult | null>(null);
+  const [applicationStatus, setApplicationStatus] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await apiGet<{ candidate: Candidate; debate: DebateResult | null }>(
-        `/api/org/postings/${postingId}/candidates/${candidateId}`,
-      );
+      const data = await apiGet<{
+        candidate: Candidate;
+        debate: DebateResult | null;
+        application_status: string | null;
+      }>(`/api/org/postings/${postingId}/candidates/${candidateId}`);
       setCandidate(data.candidate);
       setDebate(data.debate);
+      setApplicationStatus(data.application_status);
     } catch (error) {
       toast.error(error instanceof ApiError ? error.message : "Aday yüklenemedi.");
     } finally {
@@ -148,6 +153,38 @@ export default function CandidateDetailPage() {
                 {running ? "Çalışıyor..." : "Yeniden değerlendir"}
               </Button>
             </div>
+
+            {debate.pre_llm_score != null ? (
+              <Card className="border-border/60">
+                <CardHeader>
+                  <CardTitle className="text-sm">Pre-LLM aşaması (embedding + donanım)</CardTitle>
+                </CardHeader>
+                <CardContent className="grid gap-3 sm:grid-cols-3">
+                  <div className="flex flex-col items-center gap-1 rounded-md bg-muted/60 py-3">
+                    <Search className="h-4 w-4 text-muted-foreground" />
+                    <span className="text-xs text-muted-foreground">İlan uyumu (embedding)</span>
+                    <span className="text-lg font-semibold">
+                      {debate.relevance_score != null ? debate.relevance_score.toFixed(3) : "—"}
+                    </span>
+                  </div>
+                  <div className="flex flex-col items-center gap-1 rounded-md bg-muted/60 py-3">
+                    <Wrench className="h-4 w-4 text-muted-foreground" />
+                    <span className="text-xs text-muted-foreground">Donanım puanı</span>
+                    <span className="text-lg font-semibold">
+                      {debate.competency_score != null ? debate.competency_score.toFixed(3) : "—"}
+                    </span>
+                  </div>
+                  <div className="flex flex-col items-center gap-1 rounded-md bg-primary/5 py-3">
+                    <Layers className="h-4 w-4 text-primary" />
+                    <span className="text-xs text-muted-foreground">Pre-LLM birleşik puan</span>
+                    <span className="text-lg font-semibold text-primary">
+                      {debate.pre_llm_score.toFixed(3)}
+                    </span>
+                  </div>
+                </CardContent>
+              </Card>
+            ) : null}
+
             <div className="grid gap-4 sm:grid-cols-3">
               <Card className="border-border/60">
                 <CardContent className="flex flex-col items-center gap-1 py-4">
@@ -175,14 +212,16 @@ export default function CandidateDetailPage() {
             <Card className="border-border/60">
               <CardHeader className="flex-row items-center justify-between space-y-0">
                 <CardTitle className="text-sm">Hakem gerekçesi</CardTitle>
-                {debate.is_selected ? (
+                {applicationStatus === "selected" ? (
                   <StatusBadge tone="green">Seçildi</StatusBadge>
+                ) : applicationStatus === "rejected" ? (
+                  <StatusBadge tone="red">Elendi</StatusBadge>
                 ) : (
-                  <StatusBadge tone="gray">Beklemede</StatusBadge>
+                  <StatusBadge tone="gray">Karar bekliyor</StatusBadge>
                 )}
               </CardHeader>
               <CardContent>
-                <p className="text-sm text-muted-foreground">{debate.arbitrator_rationale}</p>
+                <Markdown>{debate.arbitrator_rationale}</Markdown>
               </CardContent>
             </Card>
 
@@ -195,7 +234,7 @@ export default function CandidateDetailPage() {
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <p className="text-sm text-muted-foreground">{debate.optimist_arguments}</p>
+                  <Markdown>{debate.optimist_arguments}</Markdown>
                 </CardContent>
               </Card>
               <Card className="border-border/60">
@@ -206,7 +245,7 @@ export default function CandidateDetailPage() {
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <p className="text-sm text-muted-foreground">{debate.pessimist_arguments}</p>
+                  <Markdown>{debate.pessimist_arguments}</Markdown>
                 </CardContent>
               </Card>
             </div>

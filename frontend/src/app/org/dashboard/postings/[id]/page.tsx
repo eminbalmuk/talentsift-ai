@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import { Award, CalendarClock, CheckCircle2, ListChecks, Search, TrendingUp, Upload, Users } from "lucide-react";
+import { Award, CalendarClock, CheckCircle2, Flag, ListChecks, Search, TrendingUp, Upload, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -24,6 +24,7 @@ import {
 import { apiGet, apiPost, apiUpload, ApiError } from "@/lib/api";
 import type {
   Candidate,
+  FinalizeResponse,
   JobPosting,
   RankedCandidate,
   ShortlistResponse,
@@ -57,6 +58,7 @@ export default function PostingDetailPage() {
   const [shortlisting, setShortlisting] = useState(false);
   // Total row count "Nihai sıralama" should reach before polling stops (null = not polling).
   const [shortlistTarget, setShortlistTarget] = useState<number | null>(null);
+  const [finalizing, setFinalizing] = useState(false);
 
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -161,6 +163,35 @@ export default function PostingDetailPage() {
       toast.error(error instanceof ApiError ? error.message : "Kısa liste oluşturulamadı.");
     } finally {
       setShortlisting(false);
+    }
+  }
+
+  async function handleFinalize() {
+    const count = Number(interviewSlots);
+    if (!count || count < 1) {
+      toast.error("Mülakata geçecek aday sayısını girin.");
+      return;
+    }
+    if (
+      !confirm(
+        `En iyi ${count} aday mülakata seçilecek, kalan tüm değerlendirilmiş ve ön elemede elenen adaylara sonuç bildirimi gönderilecek. Bu adaylara geri dönüş yapılamaz -- devam edilsin mi?`,
+      )
+    ) {
+      return;
+    }
+    setFinalizing(true);
+    try {
+      const data = await apiPost<FinalizeResponse>(`/api/org/postings/${postingId}/finalize`, {
+        interview_slots: count,
+      });
+      toast.success(
+        `Sonuçlandırıldı: ${data.selected_count} aday mülakata seçildi, ${data.rejected_post_llm_count} aday değerlendirme sonrası elendi, ${data.rejected_pre_llm_count} aday ön elemede elendi. ${data.notifications_sent} bildirim gönderildi.`,
+      );
+      await loadRankings();
+    } catch (error) {
+      toast.error(error instanceof ApiError ? error.message : "Sonuçlandırma başarısız oldu.");
+    } finally {
+      setFinalizing(false);
     }
   }
 
@@ -439,12 +470,23 @@ export default function PostingDetailPage() {
                 <ListChecks className="h-4 w-4" />
                 {shortlisting ? "Kısa liste oluşturuluyor..." : "Kısa liste oluştur ve analizi başlat"}
               </Button>
+              <Button
+                onClick={handleFinalize}
+                disabled={finalizing || !results || results.length === 0}
+                variant="outline"
+                className="gap-1.5 sm:w-fit"
+              >
+                <Flag className="h-4 w-4" />
+                {finalizing ? "Sonuçlandırılıyor..." : "Sonuçlandır"}
+              </Button>
             </div>
             <p className="mt-2 text-xs text-muted-foreground">
               Ön eleme (embedding + BM25 + donanım puanı) sıralamasından en iyi N aday seçilir; ilan
               ile alakası düşük adaylar N&apos;e ulaşmak için dahil edilmez. Seçilen adaylar için
               Optimist/Pessimist/Arbitrator analizi arka planda çalışır, sonuçlar tamamlandıkça
-              aşağıdaki tabloya düşer.
+              aşağıdaki tabloya düşer. Hazır olduğunuzda &quot;Sonuçlandır&quot;a basın: yukarıdaki
+              sayıya göre en iyi N aday mülakata seçilir, geri kalan tüm adaylara (LLM aşamasına
+              geçmiş olsun ya da olmasın) neden ilerlemediklerini açıklayan bir bildirim gönderilir.
             </p>
             {shortlistTarget !== null ? (
               <p className="mt-2 text-xs font-medium text-primary">
@@ -484,10 +526,12 @@ export default function PostingDetailPage() {
                     </TableCell>
                     <TableCell className="font-medium">{Number(result.final_score).toFixed(1)}</TableCell>
                     <TableCell>
-                      {result.is_selected ? (
+                      {result.application_status === "selected" ? (
                         <StatusBadge tone="green">Seçildi</StatusBadge>
+                      ) : result.application_status === "rejected" ? (
+                        <StatusBadge tone="red">Elendi</StatusBadge>
                       ) : (
-                        <StatusBadge tone="gray">Beklemede</StatusBadge>
+                        <StatusBadge tone="gray">Karar bekliyor</StatusBadge>
                       )}
                     </TableCell>
                   </TableRow>

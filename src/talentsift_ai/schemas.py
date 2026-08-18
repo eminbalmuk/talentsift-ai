@@ -46,12 +46,22 @@ class Candidate(CandidateCreate):
 
 class AgentAnalysis(BaseModel):
     score: conint(ge=0, le=100)
-    arguments: str
+    arguments: str = Field(
+        description=(
+            "2-4 concise sentences of plain prose. No markdown formatting: no headers, "
+            "no bullet/numbered lists, no bold/italics, no line breaks."
+        ),
+    )
 
 
 class ArbitratorReport(BaseModel):
     final_score: confloat(ge=0, le=100)
-    rationale: str
+    rationale: str = Field(
+        description=(
+            "2-4 concise sentences of plain prose explaining the final score. No markdown "
+            "formatting: no headers, no bullet/numbered lists, no bold/italics, no line breaks."
+        ),
+    )
 
 
 class DebateResult(BaseModel):

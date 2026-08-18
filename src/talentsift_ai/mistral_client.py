@@ -86,6 +86,7 @@ class MistralClient:
         user_prompt: str,
         response_model: type[BaseModel],
         temperature: float = 0.1,
+        max_tokens: int | None = None,
     ) -> BaseModel:
         schema = response_model.model_json_schema()
         payload = {
@@ -104,6 +105,8 @@ class MistralClient:
                 },
             },
         }
+        if max_tokens is not None:
+            payload["max_tokens"] = max_tokens
         response = await self._post("/chat/completions", payload)
         content = response["choices"][0]["message"]["content"]
         return response_model.model_validate_json(content)

@@ -10,6 +10,11 @@ from talentsift_ai.mistral_client import MistralClient
 from talentsift_ai.models import MistralModel
 from talentsift_ai.schemas import AgentAnalysis, ArbitratorReport, DebateResult
 
+# Responses are instructed to stay to 2-4 plain-text sentences; this cap is a generous
+# backstop (not a tight limit) so a verbose response gets cut cleanly rather than the
+# strict JSON payload being truncated mid-field, which would break parsing entirely.
+AGENT_MAX_TOKENS = 400
+
 
 class DebateGraph:
     def __init__(self, mistral_client: MistralClient) -> None:
@@ -62,6 +67,7 @@ class DebateGraph:
             user_prompt=self._base_prompt(state),
             response_model=AgentAnalysis,
             temperature=0.3,
+            max_tokens=AGENT_MAX_TOKENS,
         )
         return {
             "optimist_analysis": analysis.model_dump(),
@@ -78,6 +84,7 @@ class DebateGraph:
             ),
             response_model=AgentAnalysis,
             temperature=0.2,
+            max_tokens=AGENT_MAX_TOKENS,
         )
         return {
             "pessimist_analysis": analysis.model_dump(),
@@ -95,6 +102,7 @@ class DebateGraph:
             ),
             response_model=ArbitratorReport,
             temperature=0.1,
+            max_tokens=AGENT_MAX_TOKENS,
         )
         return {
             "arbitrator_report": report.model_dump(),
