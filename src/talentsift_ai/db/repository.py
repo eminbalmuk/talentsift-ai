@@ -1032,7 +1032,7 @@ class CandidateRepository:
                 INSERT INTO interview_schedules
                     (job_posting_id, candidate_id, organization_id, proposed_at,
                      location_or_link, notes)
-                VALUES ($1, $2, $3, $4, $5, $6)
+                VALUES ($1, $2, $3, $4::timestamp, $5, $6)
                 ON CONFLICT (job_posting_id, candidate_id) DO UPDATE
                 SET proposed_at = EXCLUDED.proposed_at,
                     location_or_link = EXCLUDED.location_or_link,
