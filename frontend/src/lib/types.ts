@@ -122,6 +122,11 @@ export interface TopResult {
   full_name: string;
   university: string | null;
   final_score: number;
+  // Blends final_score with pre_llm_score so visually-tied LLM scores (a common LLM
+  // habit -- rounding to multiples of 5) still resolve to a distinct, meaningful order.
+  // This is what actually decides ranking/selection; final_score alone is just the raw
+  // LLM verdict. Falls back to final_score when pre_llm_score isn't available.
+  ranking_score: number;
   arbitrator_rationale: string;
   is_selected: boolean;
   pre_llm_score?: number | null;

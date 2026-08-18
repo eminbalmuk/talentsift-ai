@@ -777,13 +777,14 @@ class CandidateRepository:
         async with self._pool.acquire() as connection:
             async with connection.transaction():
                 evaluated = await connection.fetch(
-                    """
+                    f"""
                     SELECT a.id AS application_id, a.candidate_id, a.status,
-                           d.id AS debate_result_id, d.final_score
+                           d.id AS debate_result_id, d.final_score,
+                           {self._RANKING_SCORE_EXPR}
                     FROM debate_results d
                     JOIN job_applications a ON a.candidate_id = d.candidate_id
                     WHERE d.organization_id = $1 AND a.job_posting_id = $2
-                    ORDER BY d.final_score DESC, d.pre_llm_score DESC NULLS LAST, d.created_at DESC
+                    ORDER BY ranking_score DESC, d.created_at DESC
                     """,
                     organization_id,
                     job_posting_id,
@@ -1202,23 +1203,37 @@ class CandidateRepository:
                 )
         return float(value) if value is not None else None
 
+    # Arbitrator scores cluster on round multiples of 5/10 (an LLM habit that no prompt
+    # instruction fully broke) so many candidates land on an identical final_score --
+    # with only that number visible, a rejected candidate tied with a selected one looks
+    # arbitrarily/unfairly cut. ranking_score blends in pre_llm_score (embedding fit +
+    # competency, a continuous number with real entropy) as a small, honest correction:
+    # it's an actual second signal, not manufactured precision, and it's what decides
+    # ties in both display ordering and finalize's top-N selection.
+    _RANKING_SCORE_EXPR = """
+        CASE WHEN d.pre_llm_score IS NULL THEN d.final_score
+             ELSE ROUND((d.final_score * 0.85 + d.pre_llm_score * 100 * 0.15)::numeric, 2)
+        END AS ranking_score
+    """
+
     async def top_results(
         self, organization_id: int, job_posting_id: int, limit: int = 5
     ) -> list[dict[str, Any]]:
         await self._ensure_connected()
         async with self._pool.acquire() as connection:
             rows = await connection.fetch(
-                """
+                f"""
                 SELECT p.candidate_id, u.full_name, p.university,
                        d.final_score, d.arbitrator_rationale, d.is_selected,
                        d.pre_llm_score, d.relevance_score, d.competency_score,
-                       a.status AS application_status
+                       a.status AS application_status,
+                       {self._RANKING_SCORE_EXPR}
                 FROM debate_results d
                 JOIN job_applications a ON a.candidate_id = d.candidate_id
                 JOIN candidate_profiles p ON p.candidate_id = a.candidate_id
                 JOIN candidate_users u ON u.id = a.candidate_id
                 WHERE d.organization_id = $1 AND a.job_posting_id = $2
-                ORDER BY d.final_score DESC, d.pre_llm_score DESC NULLS LAST, d.created_at DESC
+                ORDER BY ranking_score DESC, d.created_at DESC
                 LIMIT $3
                 """,
                 organization_id,
@@ -1229,15 +1244,16 @@ class CandidateRepository:
                 return [dict(row) for row in rows]
 
             rows = await connection.fetch(
-                """
+                f"""
                 SELECT c.id AS candidate_id, c.full_name, c.university,
                        d.final_score, d.arbitrator_rationale, d.is_selected,
                        d.pre_llm_score, d.relevance_score, d.competency_score,
-                       NULL::VARCHAR AS application_status
+                       NULL::VARCHAR AS application_status,
+                       {self._RANKING_SCORE_EXPR}
                 FROM debate_results d
                 JOIN candidates c ON c.id = d.candidate_id
                 WHERE d.organization_id = $1 AND c.job_posting_id = $2
-                ORDER BY d.final_score DESC, d.pre_llm_score DESC NULLS LAST, d.created_at DESC
+                ORDER BY ranking_score DESC, d.created_at DESC
                 LIMIT $3
                 """,
                 organization_id,

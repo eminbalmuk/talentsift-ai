@@ -304,11 +304,11 @@ export default function PostingDetailPage() {
   const deadline = formatDate(posting.deadline_at);
   const averageScore =
     results && results.length > 0
-      ? (results.reduce((sum, r) => sum + Number(r.final_score), 0) / results.length).toFixed(1)
+      ? (results.reduce((sum, r) => sum + Number(r.ranking_score), 0) / results.length).toFixed(1)
       : "—";
   const topScore =
     results && results.length > 0
-      ? Math.max(...results.map((r) => Number(r.final_score))).toFixed(1)
+      ? Math.max(...results.map((r) => Number(r.ranking_score))).toFixed(1)
       : "—";
 
   return (
@@ -538,9 +538,11 @@ export default function PostingDetailPage() {
               (embedding + BM25 + donanım puanı) sıralamasından en iyi ~3N adayı Optimist/Pessimist/
               Arbitrator analizine gönderir (ilanla alakası çok düşük olanlar hariç) -- sonuçlar
               tamamlandıkça aşağıdaki tabloya düşer. Hepsi bittikten sonra &quot;Sonuçlandır&quot;a
-              basın: değerlendirilen adaylar arasından final puanına göre en iyi N tanesi mülakata
-              seçilir, geri kalan tüm adaylara (LLM aşamasına geçmiş olsun ya da olmasın) neden
-              ilerlemediklerini açıklayan bir bildirim gönderilir.
+              basın: en iyi N tanesi mülakata seçilir, geri kalan tüm adaylara (LLM aşamasına
+              geçmiş olsun ya da olmasın) neden ilerlemediklerini açıklayan bir bildirim gönderilir.
+              &quot;Nihai puan&quot;, LLM puanının aynı çıktığı durumlarda adayları ayırt edebilmek
+              için ilan uyumu/donanım puanını da küçük bir ağırlıkla (%15) katan birleşik bir
+              puandır -- seçim buna göre yapılır, ham LLM puanı ayrı bir sütunda görünür.
             </p>
             {shortlistTarget !== null ? (
               <p className="mt-2 text-xs font-medium text-primary">
@@ -561,6 +563,7 @@ export default function PostingDetailPage() {
                   <TableHead>Aday</TableHead>
                   <TableHead className="hidden sm:table-cell">Üniversite</TableHead>
                   <TableHead>Nihai puan</TableHead>
+                  <TableHead className="hidden lg:table-cell">LLM puanı</TableHead>
                   <TableHead>Durum</TableHead>
                 </TableRow>
               </TableHeader>
@@ -578,7 +581,10 @@ export default function PostingDetailPage() {
                     <TableCell className="hidden text-muted-foreground sm:table-cell">
                       {result.university ?? "—"}
                     </TableCell>
-                    <TableCell className="font-medium">{Number(result.final_score).toFixed(1)}</TableCell>
+                    <TableCell className="font-medium">{Number(result.ranking_score).toFixed(2)}</TableCell>
+                    <TableCell className="hidden text-muted-foreground lg:table-cell">
+                      {Number(result.final_score).toFixed(1)}
+                    </TableCell>
                     <TableCell>
                       {result.application_status === "selected" ? (
                         <StatusBadge tone="green">Seçildi</StatusBadge>
@@ -592,7 +598,7 @@ export default function PostingDetailPage() {
                 ))}
                 {results?.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={4} className="py-10 text-center text-sm text-muted-foreground">
+                    <TableCell colSpan={5} className="py-10 text-center text-sm text-muted-foreground">
                       Henüz değerlendirme yapılmadı.
                     </TableCell>
                   </TableRow>
