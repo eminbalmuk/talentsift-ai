@@ -718,10 +718,25 @@ class CandidateRepository:
                     organization_id,
                     job_posting_id,
                 )
+                # Covers debate_results tagged with the new job_posting_id column AND
+                # legacy rows predating that column (job_posting_id IS NULL there), which
+                # top_results() still surfaces via its candidates/job_applications fallback
+                # joins -- must match that same logic or old rows would survive the reset.
                 deleted_debates = await connection.execute(
                     """
-                    DELETE FROM debate_results
-                    WHERE organization_id = $1 AND job_posting_id = $2
+                    DELETE FROM debate_results d
+                    WHERE d.organization_id = $1
+                      AND (
+                          d.job_posting_id = $2
+                          OR d.candidate_id IN (
+                              SELECT id FROM candidates
+                              WHERE organization_id = $1 AND job_posting_id = $2
+                          )
+                          OR d.candidate_id IN (
+                              SELECT candidate_id FROM job_applications
+                              WHERE organization_id = $1 AND job_posting_id = $2
+                          )
+                      )
                     """,
                     organization_id,
                     job_posting_id,
