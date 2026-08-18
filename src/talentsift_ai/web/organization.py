@@ -23,6 +23,7 @@ from talentsift_ai.pipeline.reranker import calculate_competency_score
 from talentsift_ai.schemas import JobPostingCreate
 from talentsift_ai.settings import get_settings
 from talentsift_ai.web.db import get_pool
+from talentsift_ai.web.mistral_usage import make_usage_callback
 from talentsift_ai.web.security import create_signed_session, verify_signed_session
 
 logger = logging.getLogger(__name__)
@@ -102,13 +103,14 @@ ORG_SESSION_DEPENDENCY = Depends(get_org_session)
 UPLOAD_FILES_DEPENDENCY = File(...)
 
 
-def _create_mistral_client() -> MistralClient:
+def _create_mistral_client(organization_id: int | None = None) -> MistralClient:
     settings = get_settings()
     return MistralClient(
         api_keys=settings.mistral_api_keys,
         base_url=settings.mistral_base_url,
         timeout_seconds=settings.request_timeout_seconds,
         max_concurrency=settings.max_concurrency,
+        usage_callback=make_usage_callback(organization_id),
     )
 
 
@@ -363,7 +365,7 @@ async def search_candidates(
         async with CandidateRepository(pool=get_pool()) as repository:
             posting = await _get_posting_or_404(repository, posting_id, organization_id)
             job_description = payload.job_description or posting["description"]
-            async with _create_mistral_client() as mistral:
+            async with _create_mistral_client(organization_id) as mistral:
                 service = HybridSearchService(mistral_client=mistral, repository=repository)
                 results = await service.rank(
                     organization_id=organization_id,
@@ -406,7 +408,7 @@ async def upload_candidates(
     try:
         async with CandidateRepository(pool=get_pool()) as repository:
             await _get_posting_or_404(repository, posting_id, organization_id)
-            async with _create_mistral_client() as mistral:
+            async with _create_mistral_client(organization_id) as mistral:
                 pipeline = ResumeIngestionPipeline(
                     mistral_client=mistral,
                     repository=repository,
@@ -466,7 +468,7 @@ async def run_debate(
                 raise HTTPException(status_code=404, detail="Candidate not found.")
 
             job_description = payload.job_description or posting["description"]
-            async with _create_mistral_client() as mistral:
+            async with _create_mistral_client(organization_id) as mistral:
                 query_embedding = await mistral.embed(job_description)
                 relevance_score = await repository.get_candidate_similarity(
                     candidate_id=candidate.id,
@@ -565,6 +567,7 @@ async def _run_shortlist_debate(
             base_url=settings.mistral_base_url,
             timeout_seconds=settings.request_timeout_seconds,
             max_concurrency=settings.max_concurrency,
+            usage_callback=make_usage_callback(organization_id),
         ) as mistral:
             async with CandidateRepository(pool=get_pool()) as repository:
                 await asyncio.gather(
@@ -595,7 +598,7 @@ async def create_shortlist(
             posting = await _get_posting_or_404(repository, posting_id, organization_id)
             job_description = payload.job_description or posting["description"]
 
-            async with _create_mistral_client() as mistral:
+            async with _create_mistral_client(organization_id) as mistral:
                 service = HybridSearchService(mistral_client=mistral, repository=repository)
                 ranked = await service.rank(
                     organization_id=organization_id,
@@ -712,3 +715,74 @@ async def reset_posting_evaluations(
     except (OSError, TimeoutError, ValueError, asyncpg.PostgresError) as exc:
         raise HTTPException(status_code=503, detail=DATABASE_ERROR_MESSAGE) from exc
     return {"status": "ok", **summary}
+
+
+class InterviewProposeRequest(BaseModel):
+    proposed_at: str
+    location_or_link: str | None = None
+    notes: str | None = None
+
+
+@router.post("/postings/{posting_id}/candidates/{candidate_id}/interview")
+async def propose_interview(
+    posting_id: int,
+    candidate_id: int,
+    payload: InterviewProposeRequest,
+    session: dict[str, Any] = ORG_SESSION_DEPENDENCY,
+) -> dict[str, Any]:
+    """
+    Proposes (or reschedules) an interview slot for a candidate who has been marked
+    'selected' via /finalize. Also drops a notification into the candidate's feed so
+    they see it without the org having to contact them separately.
+    """
+    organization_id = session["organization_id"]
+    try:
+        async with CandidateRepository(pool=get_pool()) as repository:
+            posting = await _get_posting_or_404(repository, posting_id, organization_id)
+            status = await repository.get_application_status(
+                candidate_id, organization_id, posting_id
+            )
+            if status != "selected":
+                raise HTTPException(
+                    status_code=400,
+                    detail="Yalnızca mülakata seçilmiş adaylar için mülakat planlanabilir.",
+                )
+            interview = await repository.upsert_interview_schedule(
+                job_posting_id=posting_id,
+                candidate_id=candidate_id,
+                organization_id=organization_id,
+                proposed_at=payload.proposed_at,
+                location_or_link=payload.location_or_link,
+                notes=payload.notes,
+            )
+            await repository.create_candidate_notification(
+                candidate_id=candidate_id,
+                job_posting_id=posting_id,
+                organization_id=organization_id,
+                type="interview_proposed",
+                title="Mülakat teklifi aldınız",
+                message=(
+                    f'"{posting["title"]}" ilanı için mülakata davet edildiniz. '
+                    "Aşağıdaki tarihi onaylayın veya reddedin."
+                ),
+                interview_schedule_id=interview["id"],
+            )
+    except (OSError, TimeoutError, ValueError, asyncpg.PostgresError) as exc:
+        raise HTTPException(status_code=503, detail=DATABASE_ERROR_MESSAGE) from exc
+    return {"status": "ok", "interview": interview}
+
+
+@router.get("/postings/{posting_id}/candidates/{candidate_id}/interview")
+async def get_interview(
+    posting_id: int,
+    candidate_id: int,
+    session: dict[str, Any] = ORG_SESSION_DEPENDENCY,
+) -> dict[str, Any]:
+    organization_id = session["organization_id"]
+    try:
+        async with CandidateRepository(pool=get_pool()) as repository:
+            await _get_posting_or_404(repository, posting_id, organization_id)
+            interview = await repository.get_interview_schedule(posting_id, candidate_id)
+    except (OSError, TimeoutError, ValueError, asyncpg.PostgresError) as exc:
+        raise HTTPException(status_code=503, detail=DATABASE_ERROR_MESSAGE) from exc
+    return {"interview": interview}

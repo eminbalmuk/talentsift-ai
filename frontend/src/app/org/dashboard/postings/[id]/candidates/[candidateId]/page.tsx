@@ -3,16 +3,25 @@
 import { useParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
-import { Gavel, GraduationCap, Layers, Search, ThumbsDown, ThumbsUp, Wrench } from "lucide-react";
+import { CalendarClock, Gavel, GraduationCap, Layers, Search, ThumbsDown, ThumbsUp, Wrench } from "lucide-react";
 import { Markdown } from "@/components/markdown";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatusBadge } from "@/components/status-badge";
+import { Textarea } from "@/components/ui/textarea";
 import { apiGet, apiPost, ApiError } from "@/lib/api";
-import type { Candidate, DebateResult } from "@/lib/types";
+import type { Candidate, DebateResult, InterviewSchedule } from "@/lib/types";
+
+const INTERVIEW_STATUS_LABEL: Record<InterviewSchedule["status"], string> = {
+  proposed: "Yanıt bekleniyor",
+  confirmed: "Aday onayladı",
+  declined: "Aday reddetti",
+};
 
 export default function CandidateDetailPage() {
   const params = useParams<{ id: string; candidateId: string }>();
@@ -22,21 +31,36 @@ export default function CandidateDetailPage() {
   const [candidate, setCandidate] = useState<Candidate | null>(null);
   const [debate, setDebate] = useState<DebateResult | null>(null);
   const [applicationStatus, setApplicationStatus] = useState<string | null>(null);
+  const [interview, setInterview] = useState<InterviewSchedule | null>(null);
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
   const [language, setLanguage] = useState("tr");
+  const [proposedAt, setProposedAt] = useState("");
+  const [locationOrLink, setLocationOrLink] = useState("");
+  const [interviewNotes, setInterviewNotes] = useState("");
+  const [proposing, setProposing] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await apiGet<{
-        candidate: Candidate;
-        debate: DebateResult | null;
-        application_status: string | null;
-      }>(`/api/org/postings/${postingId}/candidates/${candidateId}`);
+      const [data, interviewData] = await Promise.all([
+        apiGet<{
+          candidate: Candidate;
+          debate: DebateResult | null;
+          application_status: string | null;
+        }>(`/api/org/postings/${postingId}/candidates/${candidateId}`),
+        apiGet<{ interview: InterviewSchedule | null }>(
+          `/api/org/postings/${postingId}/candidates/${candidateId}/interview`,
+        ).catch(() => ({ interview: null })),
+      ]);
       setCandidate(data.candidate);
       setDebate(data.debate);
       setApplicationStatus(data.application_status);
+      setInterview(interviewData.interview);
+      if (interviewData.interview) {
+        setLocationOrLink(interviewData.interview.location_or_link ?? "");
+        setInterviewNotes(interviewData.interview.notes ?? "");
+      }
     } catch (error) {
       toast.error(error instanceof ApiError ? error.message : "Aday yüklenemedi.");
     } finally {
@@ -48,6 +72,27 @@ export default function CandidateDetailPage() {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- initial data fetch on mount
     load();
   }, [load]);
+
+  async function handleProposeInterview() {
+    if (!proposedAt) {
+      toast.error("Mülakat tarih ve saatini seçin.");
+      return;
+    }
+    setProposing(true);
+    try {
+      await apiPost(`/api/org/postings/${postingId}/candidates/${candidateId}/interview`, {
+        proposed_at: new Date(proposedAt).toISOString(),
+        location_or_link: locationOrLink || null,
+        notes: interviewNotes || null,
+      });
+      toast.success("Mülakat teklifi adaya gönderildi.");
+      await load();
+    } catch (error) {
+      toast.error(error instanceof ApiError ? error.message : "Mülakat planlanamadı.");
+    } finally {
+      setProposing(false);
+    }
+  }
 
   async function handleRunDebate() {
     setRunning(true);
@@ -132,6 +177,78 @@ export default function CandidateDetailPage() {
       </div>
 
       <div className="flex flex-col gap-4">
+        {applicationStatus === "selected" ? (
+          <Card className="border-border/60">
+            <CardHeader className="flex-row items-center justify-between space-y-0">
+              <CardTitle className="text-sm flex items-center gap-2">
+                <CalendarClock className="h-4 w-4 text-primary" />
+                Mülakat
+              </CardTitle>
+              {interview ? (
+                <StatusBadge
+                  tone={
+                    interview.status === "confirmed"
+                      ? "green"
+                      : interview.status === "declined"
+                        ? "red"
+                        : "amber"
+                  }
+                >
+                  {INTERVIEW_STATUS_LABEL[interview.status]}
+                </StatusBadge>
+              ) : null}
+            </CardHeader>
+            <CardContent className="flex flex-col gap-3">
+              {interview ? (
+                <div className="rounded-md bg-muted/60 p-3 text-xs text-muted-foreground">
+                  <p className="font-medium text-foreground">
+                    {new Date(interview.proposed_at).toLocaleString("tr-TR")}
+                  </p>
+                  {interview.location_or_link ? <p className="mt-1">{interview.location_or_link}</p> : null}
+                  {interview.notes ? <p className="mt-1">{interview.notes}</p> : null}
+                </div>
+              ) : null}
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="flex flex-col gap-1.5">
+                  <Label htmlFor="proposedAt">Tarih & saat</Label>
+                  <Input
+                    id="proposedAt"
+                    type="datetime-local"
+                    value={proposedAt}
+                    onChange={(event) => setProposedAt(event.target.value)}
+                  />
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  <Label htmlFor="locationOrLink">Konum / bağlantı</Label>
+                  <Input
+                    id="locationOrLink"
+                    placeholder="Ofis adresi veya Zoom/Meet bağlantısı"
+                    value={locationOrLink}
+                    onChange={(event) => setLocationOrLink(event.target.value)}
+                  />
+                </div>
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="interviewNotes">Not (opsiyonel)</Label>
+                <Textarea
+                  id="interviewNotes"
+                  rows={2}
+                  value={interviewNotes}
+                  onChange={(event) => setInterviewNotes(event.target.value)}
+                />
+              </div>
+              <Button onClick={handleProposeInterview} disabled={proposing} className="w-fit gap-1.5">
+                <CalendarClock className="h-4 w-4" />
+                {proposing
+                  ? "Gönderiliyor..."
+                  : interview
+                    ? "Yeniden planla"
+                    : "Mülakat teklif et"}
+              </Button>
+            </CardContent>
+          </Card>
+        ) : null}
+
         {!debate ? (
           <Card className="border-border/60">
             <CardHeader>

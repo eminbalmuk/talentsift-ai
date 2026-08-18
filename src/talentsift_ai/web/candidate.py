@@ -13,6 +13,7 @@ from talentsift_ai.pipeline import ResumeIngestionPipeline
 from talentsift_ai.pipeline.reranker import calculate_competency_score
 from talentsift_ai.settings import get_settings
 from talentsift_ai.web.db import get_pool
+from talentsift_ai.web.mistral_usage import make_usage_callback
 from talentsift_ai.web.security import create_signed_session, verify_signed_session
 
 logger = logging.getLogger(__name__)
@@ -54,13 +55,14 @@ async def get_candidate_session(
 CANDIDATE_SESSION_DEPENDENCY = Depends(get_candidate_session)
 
 
-def _create_mistral_client() -> MistralClient:
+def _create_mistral_client(organization_id: int | None = None) -> MistralClient:
     settings = get_settings()
     return MistralClient(
         api_keys=settings.mistral_api_keys,
         base_url=settings.mistral_base_url,
         timeout_seconds=settings.request_timeout_seconds,
         max_concurrency=settings.max_concurrency,
+        usage_callback=make_usage_callback(organization_id),
     )
 
 
@@ -245,7 +247,7 @@ async def _score_application_against_posting(
     try:
         posting_embedding = await repository.get_posting_embedding(job_posting_id)
         if posting_embedding is None:
-            async with _create_mistral_client() as mistral:
+            async with _create_mistral_client(organization_id) as mistral:
                 posting_embedding = await mistral.embed(posting_description)
             await repository.set_posting_embedding(job_posting_id, posting_embedding)
 
@@ -409,5 +411,29 @@ async def mark_notification_read(
             if not ok:
                 raise HTTPException(status_code=404, detail="Notification not found.")
             return {"status": "ok"}
+    except (OSError, TimeoutError, ValueError, asyncpg.PostgresError) as exc:
+        raise HTTPException(status_code=503, detail=DATABASE_ERROR_MESSAGE) from exc
+
+
+class InterviewResponseRequest(BaseModel):
+    action: str = Field(pattern="^(confirm|decline)$")
+
+
+@router.post("/interviews/{interview_id}/respond")
+async def respond_to_interview(
+    interview_id: int,
+    payload: InterviewResponseRequest,
+    session: dict[str, Any] = CANDIDATE_SESSION_DEPENDENCY,
+) -> dict[str, Any]:
+    candidate_id = session["candidate_id"]
+    new_status = "confirmed" if payload.action == "confirm" else "declined"
+    try:
+        async with CandidateRepository(pool=get_pool()) as repository:
+            interview = await repository.respond_to_interview(
+                interview_id, candidate_id, new_status
+            )
+            if interview is None:
+                raise HTTPException(status_code=404, detail="Interview not found.")
+            return {"status": "ok", "interview": interview}
     except (OSError, TimeoutError, ValueError, asyncpg.PostgresError) as exc:
         raise HTTPException(status_code=503, detail=DATABASE_ERROR_MESSAGE) from exc

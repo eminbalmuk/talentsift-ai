@@ -968,17 +968,124 @@ class CandidateRepository:
                 SELECT n.id, n.type, n.title, n.message, n.is_read, n.created_at,
                        j.title AS job_title, o.display_name AS organization_name,
                        d.optimist_score, d.optimist_arguments, d.pessimist_score,
-                       d.pessimist_arguments, d.final_score, d.arbitrator_rationale
+                       d.pessimist_arguments, d.final_score, d.arbitrator_rationale,
+                       i.id AS interview_schedule_id, i.proposed_at AS interview_proposed_at,
+                       i.location_or_link AS interview_location_or_link,
+                       i.notes AS interview_notes, i.status AS interview_status
                 FROM candidate_notifications n
                 LEFT JOIN job_postings j ON j.id = n.job_posting_id
                 LEFT JOIN organizations o ON o.id = n.organization_id
                 LEFT JOIN debate_results d ON d.id = n.debate_result_id
+                LEFT JOIN interview_schedules i ON i.id = n.interview_schedule_id
                 WHERE n.candidate_id = $1
                 ORDER BY n.created_at DESC
                 """,
                 candidate_id,
             )
         return [dict(row) for row in rows]
+
+    async def create_candidate_notification(
+        self,
+        *,
+        candidate_id: int,
+        job_posting_id: int | None,
+        organization_id: int | None,
+        type: str,
+        title: str,
+        message: str,
+        debate_result_id: int | None = None,
+        interview_schedule_id: int | None = None,
+    ) -> None:
+        await self._ensure_connected()
+        async with self._pool.acquire() as connection:
+            await connection.execute(
+                """
+                INSERT INTO candidate_notifications
+                    (candidate_id, job_posting_id, organization_id, type, title, message,
+                     debate_result_id, interview_schedule_id)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                """,
+                candidate_id,
+                job_posting_id,
+                organization_id,
+                type,
+                title,
+                message,
+                debate_result_id,
+                interview_schedule_id,
+            )
+
+    async def upsert_interview_schedule(
+        self,
+        *,
+        job_posting_id: int,
+        candidate_id: int,
+        organization_id: int,
+        proposed_at: str,
+        location_or_link: str | None,
+        notes: str | None,
+    ) -> dict[str, Any]:
+        await self._ensure_connected()
+        async with self._pool.acquire() as connection:
+            row = await connection.fetchrow(
+                """
+                INSERT INTO interview_schedules
+                    (job_posting_id, candidate_id, organization_id, proposed_at,
+                     location_or_link, notes)
+                VALUES ($1, $2, $3, $4, $5, $6)
+                ON CONFLICT (job_posting_id, candidate_id) DO UPDATE
+                SET proposed_at = EXCLUDED.proposed_at,
+                    location_or_link = EXCLUDED.location_or_link,
+                    notes = EXCLUDED.notes,
+                    status = 'proposed',
+                    updated_at = CURRENT_TIMESTAMP
+                RETURNING id, job_posting_id, candidate_id, organization_id, proposed_at,
+                          location_or_link, notes, status, created_at, updated_at
+                """,
+                job_posting_id,
+                candidate_id,
+                organization_id,
+                proposed_at,
+                location_or_link,
+                notes,
+            )
+        return dict(row)
+
+    async def get_interview_schedule(
+        self, job_posting_id: int, candidate_id: int
+    ) -> dict[str, Any] | None:
+        await self._ensure_connected()
+        async with self._pool.acquire() as connection:
+            row = await connection.fetchrow(
+                """
+                SELECT id, job_posting_id, candidate_id, organization_id, proposed_at,
+                       location_or_link, notes, status, created_at, updated_at
+                FROM interview_schedules
+                WHERE job_posting_id = $1 AND candidate_id = $2
+                """,
+                job_posting_id,
+                candidate_id,
+            )
+        return None if row is None else dict(row)
+
+    async def respond_to_interview(
+        self, interview_id: int, candidate_id: int, status: str
+    ) -> dict[str, Any] | None:
+        await self._ensure_connected()
+        async with self._pool.acquire() as connection:
+            row = await connection.fetchrow(
+                """
+                UPDATE interview_schedules
+                SET status = $3, updated_at = CURRENT_TIMESTAMP
+                WHERE id = $1 AND candidate_id = $2
+                RETURNING id, job_posting_id, candidate_id, organization_id, proposed_at,
+                          location_or_link, notes, status, created_at, updated_at
+                """,
+                interview_id,
+                candidate_id,
+                status,
+            )
+        return None if row is None else dict(row)
 
     async def get_application_status(
         self, candidate_id: int, organization_id: int, job_posting_id: int
@@ -1607,6 +1714,81 @@ class CandidateRepository:
                 is_active,
             )
             return "UPDATE 1" in result
+
+    async def record_mistral_usage(
+        self,
+        *,
+        model: str,
+        endpoint: str,
+        organization_id: int | None,
+        prompt_tokens: int | None,
+        completion_tokens: int | None,
+        total_tokens: int | None,
+        success: bool,
+    ) -> None:
+        await self._ensure_connected()
+        async with self._pool.acquire() as connection:
+            await connection.execute(
+                """
+                INSERT INTO mistral_api_usage
+                    (model, endpoint, organization_id, prompt_tokens, completion_tokens,
+                     total_tokens, success)
+                VALUES ($1, $2, $3, $4, $5, $6, $7)
+                """,
+                model,
+                endpoint,
+                organization_id,
+                prompt_tokens,
+                completion_tokens,
+                total_tokens,
+                success,
+            )
+
+    async def get_mistral_usage_summary(self, *, since_hours: int = 24) -> dict[str, Any]:
+        """Backs the admin usage panel: per-model call/error/token counts for the window,
+        overall totals, and the most recent calls for a live-ish feed."""
+        await self._ensure_connected()
+        async with self._pool.acquire() as connection:
+            by_model = await connection.fetch(
+                """
+                SELECT model,
+                       COUNT(*) AS call_count,
+                       COUNT(*) FILTER (WHERE NOT success) AS error_count,
+                       COALESCE(SUM(total_tokens), 0) AS total_tokens
+                FROM mistral_api_usage
+                WHERE created_at >= NOW() - ($1 * INTERVAL '1 hour')
+                GROUP BY model
+                ORDER BY call_count DESC
+                """,
+                since_hours,
+            )
+            totals = await connection.fetchrow(
+                """
+                SELECT COUNT(*) AS call_count,
+                       COUNT(*) FILTER (WHERE NOT success) AS error_count,
+                       COALESCE(SUM(total_tokens), 0) AS total_tokens
+                FROM mistral_api_usage
+                WHERE created_at >= NOW() - ($1 * INTERVAL '1 hour')
+                """,
+                since_hours,
+            )
+            recent = await connection.fetch(
+                """
+                SELECT u.model, u.endpoint, u.total_tokens, u.success, u.created_at,
+                       o.display_name AS organization_name
+                FROM mistral_api_usage u
+                LEFT JOIN organizations o ON o.id = u.organization_id
+                ORDER BY u.created_at DESC
+                LIMIT 50
+                """
+            )
+        return {
+            "by_model": [dict(row) for row in by_model],
+            "totals": dict(totals)
+            if totals
+            else {"call_count": 0, "error_count": 0, "total_tokens": 0},
+            "recent": [dict(row) for row in recent],
+        }
 
     async def _ensure_connected(self) -> None:
         if self._pool is None:

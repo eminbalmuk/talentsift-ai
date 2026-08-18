@@ -166,6 +166,16 @@ export default function CandidateDashboardPage() {
     }
   }
 
+  async function handleRespondInterview(interviewId: number, action: "confirm" | "decline") {
+    try {
+      await apiPost(`/api/candidate/interviews/${interviewId}/respond`, { action });
+      toast.success(action === "confirm" ? "Mülakatı onayladınız." : "Mülakatı reddettiniz.");
+      await loadData();
+    } catch (error) {
+      toast.error(error instanceof ApiError ? error.message : "Yanıt gönderilemedi.");
+    }
+  }
+
   async function handleLogout() {
     try {
       await apiPost("/api/candidate/logout", {});
@@ -556,10 +566,13 @@ export default function CandidateDashboardPage() {
                     {notifications.map((notification) => {
                       const isExpanded = expandedNotificationId === notification.id;
                       const hasDebateReport = notification.final_score != null;
+                      const isInterview = notification.type === "interview_proposed";
                       const tone =
                         notification.type === "selected"
                           ? "bg-emerald-500/10 text-emerald-600 border-emerald-500/20"
-                          : "bg-muted text-muted-foreground border-border";
+                          : isInterview
+                            ? "bg-primary/10 text-primary border-primary/20"
+                            : "bg-muted text-muted-foreground border-border";
                       return (
                         <div key={notification.id} className="py-3.5">
                           <button
@@ -587,7 +600,11 @@ export default function CandidateDashboardPage() {
                                 {new Date(notification.created_at).toLocaleDateString("tr-TR")}
                               </span>
                               <Badge variant="outline" className={`text-[11px] ${tone}`}>
-                                {notification.type === "selected" ? "Mülakata seçildiniz" : "Sonuçlandı"}
+                                {notification.type === "selected"
+                                  ? "Mülakata seçildiniz"
+                                  : isInterview
+                                    ? "Mülakat teklifi"
+                                    : "Sonuçlandı"}
                               </Badge>
                               {hasDebateReport ? (
                                 isExpanded ? (
@@ -601,6 +618,55 @@ export default function CandidateDashboardPage() {
                           <p className="text-xs text-muted-foreground mt-2 leading-relaxed">
                             {notification.message}
                           </p>
+
+                          {isInterview && notification.interview_proposed_at ? (
+                            <div className="mt-3 rounded-lg border border-primary/20 bg-primary/5 p-3">
+                              <p className="text-sm font-semibold text-foreground">
+                                {new Date(notification.interview_proposed_at).toLocaleString("tr-TR")}
+                              </p>
+                              {notification.interview_location_or_link ? (
+                                <p className="mt-1 text-xs text-muted-foreground">
+                                  {notification.interview_location_or_link}
+                                </p>
+                              ) : null}
+                              {notification.interview_notes ? (
+                                <p className="mt-1 text-xs text-muted-foreground">
+                                  {notification.interview_notes}
+                                </p>
+                              ) : null}
+                              {notification.interview_status === "proposed" ? (
+                                <div className="mt-3 flex gap-2">
+                                  <Button
+                                    size="sm"
+                                    className="h-7 text-xs gap-1"
+                                    onClick={() =>
+                                      notification.interview_schedule_id != null &&
+                                      handleRespondInterview(notification.interview_schedule_id, "confirm")
+                                    }
+                                  >
+                                    Onayla
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    className="h-7 text-xs gap-1"
+                                    onClick={() =>
+                                      notification.interview_schedule_id != null &&
+                                      handleRespondInterview(notification.interview_schedule_id, "decline")
+                                    }
+                                  >
+                                    Reddet
+                                  </Button>
+                                </div>
+                              ) : (
+                                <p className="mt-2 text-[11px] font-medium text-muted-foreground">
+                                  {notification.interview_status === "confirmed"
+                                    ? "Onayladınız."
+                                    : "Reddettiniz."}
+                                </p>
+                              )}
+                            </div>
+                          ) : null}
 
                           {isExpanded && hasDebateReport ? (
                             <div className="mt-4 space-y-4 rounded-lg border border-border/60 bg-muted/20 p-4">

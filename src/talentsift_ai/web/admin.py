@@ -212,3 +212,16 @@ async def rotate_organization_license(
     if rotated is None:
         raise HTTPException(status_code=404, detail="Organization not found.")
     return rotated
+
+
+@router.get("/mistral-usage")
+async def get_mistral_usage(
+    hours: int = 24,
+    _: dict[str, Any] = ADMIN_SESSION_DEPENDENCY,
+) -> dict[str, Any]:
+    try:
+        async with CandidateRepository(pool=get_pool()) as repository:
+            summary = await repository.get_mistral_usage_summary(since_hours=hours)
+    except (OSError, TimeoutError, ValueError, asyncpg.PostgresError) as exc:
+        raise HTTPException(status_code=503, detail=DATABASE_ERROR_MESSAGE) from exc
+    return summary

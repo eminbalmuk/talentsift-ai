@@ -14,6 +14,28 @@ export interface Organization {
   debate_count: number;
 }
 
+export interface MistralUsageByModel {
+  model: string;
+  call_count: number;
+  error_count: number;
+  total_tokens: number;
+}
+
+export interface MistralUsageRecentCall {
+  model: string;
+  endpoint: string;
+  organization_name: string | null;
+  total_tokens: number | null;
+  success: boolean;
+  created_at: string;
+}
+
+export interface MistralUsageSummary {
+  by_model: MistralUsageByModel[];
+  totals: { call_count: number; error_count: number; total_tokens: number };
+  recent: MistralUsageRecentCall[];
+}
+
 export interface OrganizationCredential {
   organization_id: number;
   display_name: string;
@@ -158,7 +180,7 @@ export interface ResetEvaluationsResponse {
 
 export interface CandidateNotification {
   id: number;
-  type: "selected" | "rejected_post_llm" | "rejected_pre_llm";
+  type: "selected" | "rejected_post_llm" | "rejected_pre_llm" | "interview_proposed";
   title: string;
   message: string;
   is_read: boolean;
@@ -171,6 +193,24 @@ export interface CandidateNotification {
   pessimist_arguments: string | null;
   final_score: number | null;
   arbitrator_rationale: string | null;
+  interview_schedule_id: number | null;
+  interview_proposed_at: string | null;
+  interview_location_or_link: string | null;
+  interview_notes: string | null;
+  interview_status: "proposed" | "confirmed" | "declined" | null;
+}
+
+export interface InterviewSchedule {
+  id: number;
+  job_posting_id: number;
+  candidate_id: number;
+  organization_id: number;
+  proposed_at: string;
+  location_or_link: string | null;
+  notes: string | null;
+  status: "proposed" | "confirmed" | "declined";
+  created_at: string;
+  updated_at: string;
 }
 
 export interface ShortlistCandidateRef {

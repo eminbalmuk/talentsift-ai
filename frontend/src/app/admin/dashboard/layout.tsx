@@ -2,12 +2,15 @@
 
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { Building2 } from "lucide-react";
+import { Activity, Building2 } from "lucide-react";
 import { DashboardShell, type NavItem } from "@/components/dashboard-shell";
 import { Skeleton } from "@/components/ui/skeleton";
 import { apiGet, apiPost } from "@/lib/api";
 
-const NAV_ITEMS: NavItem[] = [{ label: "Organizasyonlar", href: "/admin/dashboard", icon: Building2 }];
+const NAV_ITEMS: NavItem[] = [
+  { label: "Organizasyonlar", href: "/admin/dashboard", icon: Building2 },
+  { label: "Mistral Kullanımı", href: "/admin/dashboard/usage", icon: Activity },
+];
 
 export default function AdminDashboardLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();

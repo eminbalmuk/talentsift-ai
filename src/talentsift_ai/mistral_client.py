@@ -1,8 +1,9 @@
 import asyncio
 import base64
 import itertools
+import logging
 import random
-from collections.abc import Iterable
+from collections.abc import Awaitable, Callable, Iterable
 from pathlib import Path
 from typing import Any
 
@@ -13,6 +14,13 @@ from talentsift_ai.models import MistralModel
 
 MAX_RATE_LIMIT_RETRIES = 4
 RETRY_BASE_DELAY_SECONDS = 1.0
+
+# Reported to an optional usage_callback after every API call so usage can be tracked
+# for the admin usage panel -- kept as a plain dict (not a DB model) since MistralClient
+# has no DB dependency and shouldn't gain one just to log usage.
+UsageCallback = Callable[[dict[str, Any]], Awaitable[None]]
+
+logger = logging.getLogger(__name__)
 
 SUPPORTED_DOCUMENT_MIME_TYPES = {
     ".pdf": "application/pdf",
@@ -39,6 +47,7 @@ class MistralClient:
         base_url: str = "https://api.mistral.ai/v1",
         timeout_seconds: float = 120.0,
         max_concurrency: int = 16,
+        usage_callback: UsageCallback | None = None,
     ) -> None:
         keys = [key for key in api_keys if key]
         if not keys:
@@ -48,6 +57,7 @@ class MistralClient:
         self._base_url = base_url.rstrip("/")
         self._client = httpx.AsyncClient(timeout=timeout_seconds)
         self._semaphore = asyncio.Semaphore(max_concurrency)
+        self._usage_callback = usage_callback
 
     async def close(self) -> None:
         await self._client.aclose()
@@ -142,9 +152,36 @@ class MistralClient:
             )
             await asyncio.sleep(delay)
 
-        if response.status_code >= 400:
+        success = response.status_code < 400
+        if self._usage_callback is not None:
+            await self._report_usage(path, payload, response, success)
+
+        if not success:
             raise MistralClientError(f"Mistral API error {response.status_code}: {response.text}")
         return response.json()
+
+    async def _report_usage(
+        self, path: str, payload: dict[str, Any], response: httpx.Response, success: bool
+    ) -> None:
+        usage: dict[str, Any] = {}
+        if success:
+            try:
+                usage = response.json().get("usage") or {}
+            except ValueError:
+                usage = {}
+        try:
+            await self._usage_callback(
+                {
+                    "model": payload.get("model", "unknown"),
+                    "endpoint": path.lstrip("/"),
+                    "prompt_tokens": usage.get("prompt_tokens"),
+                    "completion_tokens": usage.get("completion_tokens"),
+                    "total_tokens": usage.get("total_tokens"),
+                    "success": success,
+                }
+            )
+        except Exception:
+            logger.warning("Mistral usage_callback failed", exc_info=True)
 
     @staticmethod
     def _document_data_url(document_bytes: bytes, mime_type: str) -> str:
