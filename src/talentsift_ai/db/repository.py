@@ -701,6 +701,49 @@ class CandidateRepository:
             )
         return None if row is None else dict(row)
 
+    async def reset_posting_evaluations(
+        self, *, organization_id: int, job_posting_id: int
+    ) -> dict[str, int]:
+        """Wipes every LLM evaluation, notification, and decision (selected/rejected) for a
+        posting, resetting all its applications back to 'applied' -- a clean slate for
+        re-testing the shortlist/finalize flow without earlier runs' leftovers."""
+        await self._ensure_connected()
+        async with self._pool.acquire() as connection:
+            async with connection.transaction():
+                deleted_notifications = await connection.execute(
+                    """
+                    DELETE FROM candidate_notifications
+                    WHERE organization_id = $1 AND job_posting_id = $2
+                    """,
+                    organization_id,
+                    job_posting_id,
+                )
+                deleted_debates = await connection.execute(
+                    """
+                    DELETE FROM debate_results
+                    WHERE organization_id = $1 AND job_posting_id = $2
+                    """,
+                    organization_id,
+                    job_posting_id,
+                )
+                reset_applications = await connection.execute(
+                    """
+                    UPDATE job_applications SET status = 'applied'
+                    WHERE organization_id = $1 AND job_posting_id = $2
+                    """,
+                    organization_id,
+                    job_posting_id,
+                )
+
+        def _count(result: str) -> int:
+            return int(result.split()[-1]) if result.split()[-1].isdigit() else 0
+
+        return {
+            "notifications_deleted": _count(deleted_notifications),
+            "debates_deleted": _count(deleted_debates),
+            "applications_reset": _count(reset_applications),
+        }
+
     async def finalize_shortlist(
         self,
         *,

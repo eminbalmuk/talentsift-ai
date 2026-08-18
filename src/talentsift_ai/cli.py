@@ -150,6 +150,28 @@ def reset_organization_password(
     run_async(_reset())
 
 
+@admin_app.command("reset-posting-evaluations")
+def reset_posting_evaluations(
+    organization_id: Annotated[int, typer.Option(help="Organization ID that owns the posting.")],
+    posting_id: Annotated[int, typer.Option(help="Job posting ID to wipe evaluations for.")],
+) -> None:
+    """Delete all LLM evaluations/notifications/decisions for a posting and reset its
+    applications back to 'applied' -- a clean slate for re-testing shortlist/finalize."""
+
+    async def _reset() -> None:
+        settings = get_settings()
+        async with CandidateRepository(settings.database_url) as repository:
+            result = await repository.reset_posting_evaluations(
+                organization_id=organization_id, job_posting_id=posting_id
+            )
+            console.print("[green]Posting evaluations reset[/green]")
+            console.print(f"Debate results deleted: {result['debates_deleted']}")
+            console.print(f"Notifications deleted: {result['notifications_deleted']}")
+            console.print(f"Applications reset to 'applied': {result['applications_reset']}")
+
+    run_async(_reset())
+
+
 @auth_app.command("login-check")
 def login_check(
     username: Annotated[str, typer.Option(help="Organization username.")],
