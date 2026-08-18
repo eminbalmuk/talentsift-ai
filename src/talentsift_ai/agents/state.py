@@ -14,6 +14,7 @@ class ArbitratorReportState(TypedDict):
 class AgentState(TypedDict):
     cv_text: str
     user_job_description: str
+    language: str
     optimist_analysis: NotRequired[AgentAnalysisState]
     pessimist_analysis: NotRequired[AgentAnalysisState]
     arbitrator_report: NotRequired[ArbitratorReportState]

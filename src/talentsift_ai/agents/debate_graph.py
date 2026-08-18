@@ -2,8 +2,10 @@ from langgraph.graph import END, START, StateGraph
 
 from talentsift_ai.agents.prompts import (
     ARBITRATOR_SYSTEM_PROMPT,
+    DEFAULT_LANGUAGE,
     OPTIMIST_SYSTEM_PROMPT,
     PESSIMIST_SYSTEM_PROMPT,
+    language_instruction,
 )
 from talentsift_ai.agents.state import AgentState
 from talentsift_ai.mistral_client import MistralClient
@@ -28,10 +30,12 @@ class DebateGraph:
         candidate_id: int,
         cv_text: str,
         job_description: str,
+        language: str = DEFAULT_LANGUAGE,
     ) -> DebateResult:
         state: AgentState = {
             "cv_text": cv_text,
             "user_job_description": job_description,
+            "language": language,
             "current_turn": 0,
         }
         final_state = await self._graph.ainvoke(state)
@@ -63,7 +67,7 @@ class DebateGraph:
     async def _optimist_node(self, state: AgentState) -> dict:
         analysis = await self._mistral.chat_json(
             model=MistralModel.DEBATE,
-            system_prompt=OPTIMIST_SYSTEM_PROMPT.strip(),
+            system_prompt=f"{OPTIMIST_SYSTEM_PROMPT.strip()}\n{language_instruction(state['language'])}",
             user_prompt=self._base_prompt(state),
             response_model=AgentAnalysis,
             temperature=0.3,
@@ -77,7 +81,7 @@ class DebateGraph:
     async def _pessimist_node(self, state: AgentState) -> dict:
         analysis = await self._mistral.chat_json(
             model=MistralModel.DEBATE,
-            system_prompt=PESSIMIST_SYSTEM_PROMPT.strip(),
+            system_prompt=f"{PESSIMIST_SYSTEM_PROMPT.strip()}\n{language_instruction(state['language'])}",
             user_prompt=(
                 f"{self._base_prompt(state)}\n\n"
                 f"Optimist analysis to challenge:\n{state['optimist_analysis']}"
@@ -94,7 +98,7 @@ class DebateGraph:
     async def _arbitrator_node(self, state: AgentState) -> dict:
         report = await self._mistral.chat_json(
             model=MistralModel.ARBITRATION,
-            system_prompt=ARBITRATOR_SYSTEM_PROMPT.strip(),
+            system_prompt=f"{ARBITRATOR_SYSTEM_PROMPT.strip()}\n{language_instruction(state['language'])}",
             user_prompt=(
                 f"{self._base_prompt(state)}\n\n"
                 f"Optimist analysis:\n{state['optimist_analysis']}\n\n"

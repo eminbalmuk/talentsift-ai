@@ -32,6 +32,13 @@ DATABASE_ERROR_MESSAGE = (
     "Database is not reachable. Start local Postgres, run migrations, then try again."
 )
 MAX_UPLOAD_FILES = 20
+# "Mülakata geçecek aday sayısı" (candidate_count) is the FINAL interview target, not
+# the number of candidates sent to the LLM debate stage. The pre-LLM stage funnels a
+# wider pool -- candidate_count * this multiplier -- into the (expensive) LLM debate,
+# so the debate stage has enough evaluated candidates to meaningfully pick the best
+# candidate_count from afterwards via POST /finalize. Without this, the two stages
+# would evaluate the same N candidates and the debate step could never actually filter.
+SHORTLIST_FUNNEL_MULTIPLIER = 3
 # Candidates below this fraction of the top candidate's pre-LLM score are dropped from
 # the shortlist even if the requested candidate_count isn't reached yet -- a low-relevance
 # applicant shouldn't consume an expensive debate slot just to fill a quota.
@@ -66,6 +73,7 @@ class CandidateSearchRequest(BaseModel):
 class DebateRequest(BaseModel):
     candidate_id: int
     job_description: str | None = None
+    language: str = "tr"
 
 
 class ShortlistRequest(BaseModel):
@@ -74,6 +82,7 @@ class ShortlistRequest(BaseModel):
     min_gpa: float | None = None
     class_year: int | None = None
     min_experience_years: int | None = None
+    language: str = "tr"
 
 
 async def get_org_session(
@@ -472,6 +481,7 @@ async def run_debate(
                     candidate_id=candidate.id,
                     cv_text=candidate.raw_cv_text,
                     job_description=job_description,
+                    language=payload.language,
                 )
                 result_id = await repository.save_debate_result(
                     result,
@@ -497,6 +507,7 @@ async def _run_shortlist_debate(
     posting_id: int,
     job_description: str,
     candidates: list[dict[str, Any]],
+    language: str = "tr",
 ) -> None:
     """Runs the Optimist/Pessimist/Arbitrator debate for a shortlist of candidates.
 
@@ -530,6 +541,7 @@ async def _run_shortlist_debate(
                     candidate_id=candidate.id,
                     cv_text=candidate.raw_cv_text,
                     job_description=job_description,
+                    language=language,
                 )
                 await repository.save_debate_result(
                     result,
@@ -564,10 +576,12 @@ async def create_shortlist(
     session: dict[str, Any] = ORG_SESSION_DEPENDENCY,
 ) -> dict[str, Any]:
     """
-    Ranks applicants with the Pre-LLM stage (embedding + BM25 + competency score), keeps up to
-    candidate_count of them (fewer if relevance drops off sharply), and queues the
-    Optimist/Pessimist/Arbitrator debate for each in the background. Progress shows up
-    incrementally on GET /postings/{posting_id}/rankings/top as each debate finishes.
+    Ranks applicants with the Pre-LLM stage (embedding + BM25 + competency score) and funnels
+    up to candidate_count * SHORTLIST_FUNNEL_MULTIPLIER of them (fewer if relevance drops off
+    sharply) into the Optimist/Pessimist/Arbitrator debate, run in the background. candidate_count
+    itself is the FINAL interview target -- POST /finalize later picks the best candidate_count
+    from everyone debated. Progress shows up incrementally on GET /postings/{posting_id}/rankings/top
+    as each debate finishes.
     """
     organization_id = session["organization_id"]
     try:
@@ -584,7 +598,7 @@ async def create_shortlist(
                     min_gpa=payload.min_gpa,
                     class_year=payload.class_year,
                     min_experience_years=payload.min_experience_years,
-                    limit=payload.candidate_count,
+                    limit=payload.candidate_count * SHORTLIST_FUNNEL_MULTIPLIER,
                 )
 
             if not ranked:
@@ -618,6 +632,7 @@ async def create_shortlist(
             posting_id=posting_id,
             job_description=job_description,
             candidates=to_queue,
+            language=payload.language,
         )
 
     return {

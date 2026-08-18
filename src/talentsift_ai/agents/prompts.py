@@ -1,3 +1,15 @@
+DEFAULT_LANGUAGE = "tr"
+
+LANGUAGE_INSTRUCTIONS = {
+    "tr": "Write your entire response in Turkish (Türkçe), including the arguments/rationale field.",
+    "en": "Write your entire response in English.",
+}
+
+
+def language_instruction(language: str) -> str:
+    return LANGUAGE_INSTRUCTIONS.get(language, LANGUAGE_INSTRUCTIONS[DEFAULT_LANGUAGE])
+
+
 LENGTH_AND_FORMAT_RULE = (
     "Be brief: 2-4 sentences maximum. Plain prose only -- no markdown, no headers, no "
     "bullet or numbered lists, no bold/italics, no line breaks."

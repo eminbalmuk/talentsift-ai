@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatCard } from "@/components/stat-card";
 import { StatusBadge } from "@/components/status-badge";
@@ -55,6 +56,7 @@ export default function PostingDetailPage() {
   const [searching, setSearching] = useState(false);
 
   const [interviewSlots, setInterviewSlots] = useState("50");
+  const [language, setLanguage] = useState("tr");
   const [shortlisting, setShortlisting] = useState(false);
   // Total row count "Nihai sıralama" should reach before polling stops (null = not polling).
   const [shortlistTarget, setShortlistTarget] = useState<number | null>(null);
@@ -142,6 +144,7 @@ export default function PostingDetailPage() {
           min_gpa: minGpa ? Number(minGpa) : undefined,
           class_year: classYear ? Number(classYear) : undefined,
           min_experience_years: minExperience ? Number(minExperience) : undefined,
+          language,
         },
       );
       if (data.shortlisted_count === 0) {
@@ -462,6 +465,18 @@ export default function PostingDetailPage() {
                   onChange={(event) => setInterviewSlots(event.target.value)}
                 />
               </div>
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="debateLanguage">Değerlendirme dili</Label>
+                <Select value={language} onValueChange={(value) => setLanguage(value ?? "tr")}>
+                  <SelectTrigger id="debateLanguage" className="w-[140px]">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="tr">Türkçe</SelectItem>
+                    <SelectItem value="en">İngilizce</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
               <Button
                 onClick={handleShortlist}
                 disabled={shortlisting}
@@ -481,12 +496,14 @@ export default function PostingDetailPage() {
               </Button>
             </div>
             <p className="mt-2 text-xs text-muted-foreground">
-              Ön eleme (embedding + BM25 + donanım puanı) sıralamasından en iyi N aday seçilir; ilan
-              ile alakası düşük adaylar N&apos;e ulaşmak için dahil edilmez. Seçilen adaylar için
-              Optimist/Pessimist/Arbitrator analizi arka planda çalışır, sonuçlar tamamlandıkça
-              aşağıdaki tabloya düşer. Hazır olduğunuzda &quot;Sonuçlandır&quot;a basın: yukarıdaki
-              sayıya göre en iyi N aday mülakata seçilir, geri kalan tüm adaylara (LLM aşamasına
-              geçmiş olsun ya da olmasın) neden ilerlemediklerini açıklayan bir bildirim gönderilir.
+              Girdiğiniz sayı (N) <strong className="text-foreground font-medium">nihai mülakat hedefidir</strong>,
+              LLM&apos;e gidecek aday sayısı değildir. &quot;Kısa liste oluştur&quot; ön eleme
+              (embedding + BM25 + donanım puanı) sıralamasından en iyi ~3N adayı Optimist/Pessimist/
+              Arbitrator analizine gönderir (ilanla alakası çok düşük olanlar hariç) -- sonuçlar
+              tamamlandıkça aşağıdaki tabloya düşer. Hepsi bittikten sonra &quot;Sonuçlandır&quot;a
+              basın: değerlendirilen adaylar arasından final puanına göre en iyi N tanesi mülakata
+              seçilir, geri kalan tüm adaylara (LLM aşamasına geçmiş olsun ya da olmasın) neden
+              ilerlemediklerini açıklayan bir bildirim gönderilir.
             </p>
             {shortlistTarget !== null ? (
               <p className="mt-2 text-xs font-medium text-primary">

@@ -8,6 +8,7 @@ import { Markdown } from "@/components/markdown";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatusBadge } from "@/components/status-badge";
 import { apiGet, apiPost, ApiError } from "@/lib/api";
@@ -23,6 +24,7 @@ export default function CandidateDetailPage() {
   const [applicationStatus, setApplicationStatus] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
+  const [language, setLanguage] = useState("tr");
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -52,6 +54,7 @@ export default function CandidateDetailPage() {
     try {
       const result = await apiPost<DebateResult>(`/api/org/postings/${postingId}/debate`, {
         candidate_id: Number(candidateId),
+        language,
       });
       setDebate(result);
       toast.success("Çoklu ajan değerlendirmesi tamamlandı.");
@@ -138,20 +141,42 @@ export default function CandidateDetailPage() {
               <p className="mb-3 text-sm text-muted-foreground">
                 İlanın iş tanımı kullanılarak İyimser/Kötümser/Hakem ajan sürecini başlatın.
               </p>
-              <Button onClick={handleRunDebate} disabled={running}>
-                {running ? "İyimser, kötümser ve hakem ajanlar çalışıyor..." : "Değerlendirmeyi başlat"}
-              </Button>
+              <div className="flex items-center gap-2">
+                <Select value={language} onValueChange={(value) => setLanguage(value ?? "tr")}>
+                  <SelectTrigger className="w-[130px]">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="tr">Türkçe</SelectItem>
+                    <SelectItem value="en">İngilizce</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Button onClick={handleRunDebate} disabled={running}>
+                  {running ? "İyimser, kötümser ve hakem ajanlar çalışıyor..." : "Değerlendirmeyi başlat"}
+                </Button>
+              </div>
             </CardContent>
           </Card>
         ) : null}
 
         {debate ? (
           <div className="flex flex-col gap-4">
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between gap-2">
               <h2 className="text-sm font-medium text-foreground">Değerlendirme sonucu</h2>
-              <Button variant="outline" size="sm" onClick={handleRunDebate} disabled={running}>
-                {running ? "Çalışıyor..." : "Yeniden değerlendir"}
-              </Button>
+              <div className="flex items-center gap-2">
+                <Select value={language} onValueChange={(value) => setLanguage(value ?? "tr")}>
+                  <SelectTrigger className="w-[130px]">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="tr">Türkçe</SelectItem>
+                    <SelectItem value="en">İngilizce</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Button variant="outline" size="sm" onClick={handleRunDebate} disabled={running}>
+                  {running ? "Çalışıyor..." : "Yeniden değerlendir"}
+                </Button>
+              </div>
             </div>
 
             {debate.pre_llm_score != null ? (
