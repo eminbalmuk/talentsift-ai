@@ -41,6 +41,7 @@ export default function OrgDashboardLayout({ children }: { children: React.React
       navItems={NAV_ITEMS}
       userLabel={displayName}
       onLogout={handleLogout}
+      themeClass="theme-org"
     >
       {children}
     </DashboardShell>

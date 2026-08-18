@@ -59,7 +59,7 @@ export default function OrgLoginPage() {
   }
 
   return (
-    <div className="relative isolate flex min-h-screen flex-col items-center justify-center overflow-hidden bg-muted/30 p-4">
+    <div className="theme-org relative isolate flex min-h-screen flex-col items-center justify-center overflow-hidden bg-muted/30 p-4">
       <AuroraBackground />
       <div className="absolute left-6 top-6 z-10">
         <Link

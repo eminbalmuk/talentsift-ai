@@ -79,6 +79,7 @@ export function DashboardShell({
   navItems,
   userLabel,
   onLogout,
+  themeClass,
   children,
 }: {
   brand: string;
@@ -86,6 +87,7 @@ export function DashboardShell({
   navItems: NavItem[];
   userLabel: string;
   onLogout: () => void;
+  themeClass?: string;
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
@@ -95,7 +97,7 @@ export function DashboardShell({
   )?.label;
 
   return (
-    <div className="flex min-h-screen bg-muted/30">
+    <div className={cn("flex min-h-screen bg-muted/30", themeClass)}>
       <aside className="hidden w-[236px] shrink-0 md:block">
         <div className="fixed h-screen w-[236px]">
           <SidebarContent
