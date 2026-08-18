@@ -681,3 +681,25 @@ async def finalize_shortlist(
     except (OSError, TimeoutError, ValueError, asyncpg.PostgresError) as exc:
         raise HTTPException(status_code=503, detail=DATABASE_ERROR_MESSAGE) from exc
     return {"status": "ok", **summary}
+
+
+@router.post("/postings/{posting_id}/reset-evaluations")
+async def reset_posting_evaluations(
+    posting_id: int,
+    session: dict[str, Any] = ORG_SESSION_DEPENDENCY,
+) -> dict[str, Any]:
+    """
+    Deletes every LLM evaluation, notification, and selected/rejected decision for this
+    posting and resets all its applications back to 'applied' -- lets an organization
+    start the shortlist/finalize cycle over from a clean slate.
+    """
+    organization_id = session["organization_id"]
+    try:
+        async with CandidateRepository(pool=get_pool()) as repository:
+            await _get_posting_or_404(repository, posting_id, organization_id)
+            summary = await repository.reset_posting_evaluations(
+                organization_id=organization_id, job_posting_id=posting_id
+            )
+    except (OSError, TimeoutError, ValueError, asyncpg.PostgresError) as exc:
+        raise HTTPException(status_code=503, detail=DATABASE_ERROR_MESSAGE) from exc
+    return {"status": "ok", **summary}

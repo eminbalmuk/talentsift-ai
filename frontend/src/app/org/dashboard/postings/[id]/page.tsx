@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import { Award, CalendarClock, CheckCircle2, Flag, ListChecks, Search, TrendingUp, Upload, Users } from "lucide-react";
+import { Award, CalendarClock, CheckCircle2, Flag, ListChecks, RotateCcw, Search, TrendingUp, Upload, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -28,6 +28,7 @@ import type {
   FinalizeResponse,
   JobPosting,
   RankedCandidate,
+  ResetEvaluationsResponse,
   ShortlistResponse,
   TopResult,
   UploadResult,
@@ -61,6 +62,7 @@ export default function PostingDetailPage() {
   // Total row count "Nihai sıralama" should reach before polling stops (null = not polling).
   const [shortlistTarget, setShortlistTarget] = useState<number | null>(null);
   const [finalizing, setFinalizing] = useState(false);
+  const [resetting, setResetting] = useState(false);
 
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -195,6 +197,32 @@ export default function PostingDetailPage() {
       toast.error(error instanceof ApiError ? error.message : "Sonuçlandırma başarısız oldu.");
     } finally {
       setFinalizing(false);
+    }
+  }
+
+  async function handleResetEvaluations() {
+    if (
+      !confirm(
+        "Bu ilan için yapılmış TÜM LLM değerlendirmelerini, bildirimleri ve seçildi/elendi kararlarını siler; tüm başvurular yeniden 'Başvuruldu' durumuna döner. Bu işlem geri alınamaz -- değerlendirmeleri sıfırlayıp en baştan başlamak istediğinize emin misiniz?",
+      )
+    ) {
+      return;
+    }
+    setResetting(true);
+    try {
+      const data = await apiPost<ResetEvaluationsResponse>(
+        `/api/org/postings/${postingId}/reset-evaluations`,
+        {},
+      );
+      toast.success(
+        `Sıfırlandı: ${data.debates_deleted} değerlendirme, ${data.notifications_deleted} bildirim silindi; ${data.applications_reset} başvuru "Başvuruldu" durumuna döndü.`,
+      );
+      await loadRankings();
+      await loadPosting();
+    } catch (error) {
+      toast.error(error instanceof ApiError ? error.message : "Sıfırlama başarısız oldu.");
+    } finally {
+      setResetting(false);
     }
   }
 
@@ -493,6 +521,15 @@ export default function PostingDetailPage() {
               >
                 <Flag className="h-4 w-4" />
                 {finalizing ? "Sonuçlandırılıyor..." : "Sonuçlandır"}
+              </Button>
+              <Button
+                onClick={handleResetEvaluations}
+                disabled={resetting || !results || results.length === 0}
+                variant="ghost"
+                className="gap-1.5 text-muted-foreground hover:text-destructive sm:w-fit"
+              >
+                <RotateCcw className="h-4 w-4" />
+                {resetting ? "Sıfırlanıyor..." : "Değerlendirmeleri sıfırla"}
               </Button>
             </div>
             <p className="mt-2 text-xs text-muted-foreground">

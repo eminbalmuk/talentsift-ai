@@ -138,6 +138,13 @@ export interface FinalizeResponse {
   notifications_sent: number;
 }
 
+export interface ResetEvaluationsResponse {
+  status: string;
+  debates_deleted: number;
+  notifications_deleted: number;
+  applications_reset: number;
+}
+
 export interface CandidateNotification {
   id: number;
   type: "selected" | "rejected_post_llm" | "rejected_pre_llm";
