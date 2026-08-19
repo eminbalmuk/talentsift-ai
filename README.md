@@ -1,45 +1,68 @@
 # TalentSift AI
 
-TalentSift AI is a scalable, multi-stage hybrid RAG pipeline for screening large resume batches. It combines async Mistral OCR/extraction, PostgreSQL + pgvector semantic ranking, and a LangGraph Optimist/Pessimist/Arbitrator review flow.
+TalentSift AI, yüksek sayıdaki özgeçmişi yapay zeka destekli ve çok aşamalı bir süreçle değerlendiren bir resume screening platformudur. Sistem; Mistral OCR ve extraction, PostgreSQL + pgvector ile semantic ranking ve LangGraph tabanlı Optimist, Pessimist ve Arbitrator review akışını birlikte kullanır.
 
-## Quick Start
+## Özellikler
+
+- Mistral modelleriyle asenkron OCR ve yapılandırılmış resume extraction
+- Organization bazlı tenant isolation
+- PostgreSQL ve pgvector üzerinde filtreleme ve semantic ranking
+- LangGraph agent'larıyla aday skorlarının adversarial review sürecinden geçirilmesi
+- Admin ve organization kullanıcıları için Next.js tabanlı web arayüzü
+- İsteğe bağlı Phoenix tracing ve RAGAS evaluation entegrasyonu
+
+## Gereksinimler
+
+- Python 3.11 veya üzeri
+- Node.js ve npm
+- Docker Desktop
+- Mistral API key
+
+Yerel geliştirme için Docker üzerinde PostgreSQL ve pgvector çalıştırılır. Python backend ile Next.js frontend ayrı süreçler olarak başlatılır.
+
+## Yerel Kurulum
+
+### 1. Python ortamını hazırlayın
+
+PowerShell içinde repository kök dizininde:
 
 ```powershell
 python -m venv .venv
-.\\.venv\\Scripts\\Activate.ps1
+.\.venv\Scripts\Activate.ps1
 pip install -e ".[dev,observability,eval]"
 copy .env.example .env
 ```
 
-Fill in `.env` (Mistral keys, secrets — see `.env.example` for what each value does).
+`.env` dosyasını açıp `MISTRAL_API_KEYS`, `PRODUCT_KEY_PEPPER` ve `ADMIN_SESSION_SECRET` değerlerini doldurun. Değişkenlerin açıklamaları için `.env.example` dosyasına bakabilirsiniz.
 
-Start a local PostgreSQL database with pgvector:
+### 2. PostgreSQL'i başlatın
 
 ```powershell
 docker compose up -d
-```
-
-Create the database schema:
-
-```powershell
 talentsift db init
 ```
 
-Provision the owner admin login. The username and password are fully random and printed once.
+`db init` migration'ları idempotent biçimde çalıştırır; aynı komutu tekrar çalıştırmak mevcut şemaya zarar vermez.
+
+### 3. Admin kullanıcısını oluşturun
 
 ```powershell
 talentsift admin provision
 ```
 
-Start the JSON API that the web frontend talks to:
+Komut, kullanıcı adı ve parolayı tamamen rastgele üretir ve bunları yalnızca bir kez terminale yazdırır. Parolayı güvenli bir yerde saklayın.
+
+### 4. Backend'i başlatın
 
 ```powershell
 talentsift admin serve
 ```
 
-This serves the admin and organization API routes at `http://127.0.0.1:8000/api/*`.
+JSON API varsayılan olarak `http://127.0.0.1:8000` adresinde çalışır. Admin ve organization endpoint'leri sırasıyla `/api/admin/*` ve `/api/org/*` altında bulunur.
 
-In a separate terminal, install and start the Next.js frontend:
+### 5. Frontend'i başlatın
+
+Ayrı bir terminal açın:
 
 ```powershell
 cd frontend
@@ -47,153 +70,121 @@ npm install
 npm run dev
 ```
 
-Open `http://localhost:3000`, sign in with the generated admin credential at `/admin/login`, and use "Organizasyon ekle" to create licensed organizations. Organization display names are only labels; each organization receives a fully random username and password. Organizations sign in at `/org/login` to browse candidates, run the debate pipeline, and view final rankings.
+Geliştirme ortamında frontend'i `http://localhost:3000` adresinden açın. Admin kullanıcısıyla `/admin/login` üzerinden giriş yaptıktan sonra `Organizasyon ekle` ile lisanslı organization oluşturabilirsiniz. Organization kullanıcıları `/org/login` üzerinden giriş yaparak adayları arayabilir, debate pipeline'ını çalıştırabilir ve final ranking sonuçlarını inceleyebilir.
 
-> Use `http://localhost:3000`, not `127.0.0.1`, when opening the frontend in development — Next.js blocks cross-origin dev asset requests by default.
+Frontend, `/api/*` isteklerini `BACKEND_URL` değişkeni üzerinden backend'e proxy eder. Değişken belirtilmezse `http://127.0.0.1:8000` kullanılır. Bu nedenle yerel geliştirmede backend ve frontend aynı anda çalışmalıdır. Next.js'in development asset kuralları nedeniyle frontend'i `127.0.0.1` yerine `localhost` üzerinden açın.
 
-The frontend proxies `/api/*` to the backend (configurable via the `BACKEND_URL` environment variable, default `http://127.0.0.1:8000`), so both must be running together in development.
-
-You can also add an organization from the CLI:
+İsterseniz organization kaydını CLI üzerinden de oluşturabilirsiniz:
 
 ```powershell
 talentsift admin add-organization --display-name "Acme Corp"
 ```
 
-Verify an organization login credential:
+Bir organization credential'ının geçerli olduğunu kontrol etmek için:
 
 ```powershell
 talentsift auth login-check --username "org_..." --password "pw_..."
 ```
 
-Ingest resumes:
+Resume dosyalarını sisteme alın:
 
 ```powershell
-talentsift ingest --organization-id 1 --resume-dir .\\resumes
+talentsift ingest --organization-id 1 --resume-dir .\resumes
 ```
 
-Rank candidates for a role:
+Bir role göre adayları sıralayın:
 
 ```powershell
-talentsift rank --organization-id 1 --job-description ".\\job.txt" --min-gpa 2.75 --class-year 3 --limit 50
+talentsift rank --organization-id 1 --job-description ".\job.txt" --min-gpa 2.75 --class-year 3 --limit 50
 ```
 
-Run the adversarial review for ranked candidates:
+Sıralanan bir aday için adversarial review çalıştırın:
 
 ```powershell
-talentsift debate --organization-id 1 --job-description ".\\job.txt" --candidate-id 1
+talentsift debate --organization-id 1 --job-description ".\job.txt" --candidate-id 1
 ```
 
-Show the final ranking:
+Final ranking sonuçlarını gösterin:
 
 ```powershell
 talentsift top --organization-id 1 --limit 5
 ```
 
-## Architecture
+## Proje Yapısı
 
-1. Async OCR and structured extraction with Mistral models.
-2. B2B tenant isolation with organization-scoped candidates and debate results.
-3. PostgreSQL + pgvector for strict filters and semantic ranking.
-4. LangGraph Optimist, Pessimist, and Arbitrator agents for final scoring.
-5. Optional Phoenix tracing and RAGAS evaluation hooks.
-6. A Next.js (TypeScript, Tailwind, shadcn/ui) frontend in `frontend/` that talks to the FastAPI
-   JSON API — an admin console for organization/license management, and an organization console
-   for candidate search, semantic ranking, and running the debate pipeline.
+- `src/talentsift_ai/`: Python backend, CLI, pipeline, agent'lar ve database erişimi
+- `src/talentsift_ai/web/`: FastAPI endpoint'leri ve web katmanı
+- `migrations/`: PostgreSQL şema migration'ları
+- `tests/`: Backend testleri
+- `frontend/`: Next.js, TypeScript, Tailwind ve shadcn/ui tabanlı web uygulaması
+- `Dockerfile`: Backend container tanımı
+- `render.yaml`: Render Blueprint deployment tanımı
 
-## Frontend
+Frontend PostgreSQL'e doğrudan bağlanmaz. Tüm database erişimi `asyncpg` ve backend içindeki SQL repository katmanı üzerinden yapılır; frontend yalnızca FastAPI JSON API'sini kullanır.
 
-`frontend/` is a standalone Next.js app. It never talks to Postgres directly — every request goes
-through the FastAPI JSON API (`talentsift_ai.web.app`) under `/api/admin/*` (owner admin) and
-`/api/org/*` (organization users), proxied in development via `next.config.ts` rewrites. Both
-processes must run side by side locally (`talentsift admin serve` for the API, `npm run dev` in
-`frontend/` for the UI).
+## Test ve Kalite Kontrolleri
 
-## Database Strategy
+Python development bağımlılıklarını kurduktan sonra:
 
-Local development uses Dockerized Postgres with pgvector. Production uses Supabase Postgres (see
-below). The application talks to standard Postgres via `asyncpg`, so the same migrations work in
-both places unchanged.
+```powershell
+pytest
+ruff check .
+```
 
-## Production Deployment (Supabase + Render + Vercel)
+Frontend için:
 
-The backend (FastAPI + asyncpg + LangGraph) runs on Render as a Docker web service — it's not
-deployed to Vercel, since the OCR/embedding/debate pipeline includes long-running, sequential
-Mistral calls that don't fit serverless execution-time limits. Only the Next.js frontend goes on
-Vercel.
+```powershell
+cd frontend
+npm run lint
+npm run build
+```
 
-**We don't use Prisma or any Node ORM.** The backend already owns all database access
-(`asyncpg` + hand-written SQL in `db/repository.py`); the frontend never talks to Postgres
-directly, it only calls the FastAPI JSON API. Pointing an ORM at the database from the frontend
-would duplicate that logic in a second language and bypass the auth/tenant-isolation rules the
-backend already enforces — so we skip that part of the generic Vercel/Supabase integration
-snippet entirely.
+## Database Stratejisi
 
-### 1. Supabase (database)
+Yerel geliştirmede `docker compose` ile PostgreSQL 16 ve pgvector kullanılır. Production ortamında Supabase Postgres kullanılabilir. Uygulama standart PostgreSQL bağlantısı üzerinden `asyncpg` kullandığı için aynı migration'lar iki ortamda da çalışır.
 
-1. Create a Supabase project and enable the `vector` extension (Database → Extensions → `vector`,
-   or let `talentsift db init` run `CREATE EXTENSION IF NOT EXISTS vector` for you — the
-   Supabase Postgres role has permission for it).
-2. Copy two connection strings from Project Settings → Database → Connection string:
-   - **Transaction pooler** (port `6543`) → `DATABASE_URL`. Used by the running app; safe for
-     many concurrent serverless-style connections.
-   - **Session/direct** connection (port `5432`) → `DIRECT_DATABASE_URL`. Used only for running
-     migrations, since PgBouncer's transaction mode doesn't reliably support the DDL statements
-     migrations issue.
+Supabase kullanırken:
 
-   **Drop any `?pgbouncer=true` query parameter from both URLs.** That flag is for Prisma's
-   pooler-aware client — `asyncpg` doesn't recognize it and raises a `ValueError` on every
-   connection attempt (surfaces as a 500 on every endpoint that touches the database).
-3. `asyncpg` is already configured with `statement_cache_size=0` (see `db/repository.py`), which
-   is what actually makes it compatible with PgBouncer's transaction-mode pooler — no URL flag
-   needed.
+1. Database ayarlarından `vector` extension'ını etkinleştirin.
+2. Uygulama çalışırken kullanılacak transaction pooler bağlantısını `DATABASE_URL` olarak tanımlayın. Bu bağlantı port `6543` kullanır.
+3. Migration'lar için direct/session bağlantısını `DIRECT_DATABASE_URL` olarak tanımlayın. Bu bağlantı port `5432` kullanır.
+4. Her iki URL'den de `?pgbouncer=true` parametresini kaldırın. Bu parametre Prisma içindir; `asyncpg` tarafından tanınmaz.
 
-You don't need to run migrations by hand — the Render service does it on every startup (see
-below). If you'd rather run them locally against Supabase (e.g. to debug), point `DATABASE_URL`
-at the **direct** URL temporarily and run `talentsift db init`.
+Migration'lar production'da container başlarken otomatik olarak çalıştırılır. Supabase migration'larını yerelde çalıştırmanız gerekirse doğrudan bağlantıyı kullanarak `talentsift db init` komutunu çalıştırın.
 
-### 2. Backend (Render)
+## Production Deployment
 
-`render.yaml` at the repo root is a [Render Blueprint](https://render.com/docs/blueprint-spec) —
-it declares a Docker web service built from the root `Dockerfile`, a `/healthz` health check, and
-its required environment variables.
+Önerilen deployment modeli:
 
-1. In the Render dashboard: **New +** → **Blueprint** → connect this repo. Render reads
-   `render.yaml` and proposes the `talentsift-api` service.
-2. `PRODUCT_KEY_PEPPER` and `ADMIN_SESSION_SECRET` are generated for you automatically
-   (`generateValue: true`). Fill in the rest when prompted:
+- **Supabase**: PostgreSQL ve pgvector
+- **Render**: FastAPI backend ve LangGraph pipeline
+- **Vercel**: Next.js frontend
 
-   | Variable | Value |
-   | --- | --- |
-   | `DATABASE_URL` | Supabase transaction-pooler URL (port 6543, **no** `?pgbouncer=true`) |
-   | `DIRECT_DATABASE_URL` | Supabase direct URL (port 5432), used for migrations |
-   | `MISTRAL_API_KEYS` | Comma-separated Mistral API keys |
+### Backend: Render
 
-   `COOKIE_SECURE` and `MISTRAL_BASE_URL` are already set in the blueprint.
-3. Deploy. Render injects `PORT`; the Docker `CMD` reads it automatically. On every container
-   start it also runs `talentsift db init` (idempotent — safe to repeat) and
-   `talentsift admin provision --skip-if-exists` (only creates an admin the first time) before
-   starting the server. No Shell access needed — that's a paid Render feature we don't rely on.
-4. Open the service's **Logs** tab (free on every plan) and find the first boot's output:
-   ```
-   Admin credential provisioned
-   Username: admin_...
-   Password: ...
-   ```
-   Copy that password now — only its hash is stored, it won't be shown again. If you miss it,
-   there's no recovery command yet; delete the row from `admin_users` in Supabase and redeploy
-   (or restart) the service to have it provisioned again.
-5. Note the service URL Render assigns (e.g. `https://talentsift-api.onrender.com`) — the
-   frontend needs it as `BACKEND_URL` in the next step.
+Kök dizindeki `render.yaml` bir Render Blueprint'tir. Yeni bir Blueprint oluşturup repository'yi bağlayın. Render, `Dockerfile` üzerinden `talentsift-api` web service'ini oluşturur.
 
-> The Dockerfile itself isn't Render-specific — if you ever move off Render, the same image runs
-> unchanged on Railway, Fly.io, or any other container host.
+Gerekli environment variable'lar:
 
-### 3. Frontend (Vercel)
+| Değişken | Açıklama |
+| --- | --- |
+| `DATABASE_URL` | Supabase transaction pooler URL'si, port `6543` |
+| `DIRECT_DATABASE_URL` | Migration'lar için Supabase direct URL'si, port `5432` |
+| `MISTRAL_API_KEYS` | Virgülle ayrılmış Mistral API key listesi |
+| `PRODUCT_KEY_PEPPER` | Render tarafından üretilebilen uzun, rastgele secret |
+| `ADMIN_SESSION_SECRET` | Render tarafından üretilebilen uzun, rastgele secret |
 
-1. Import the repo into Vercel and set **Root Directory** to `frontend` (Next.js is
-   auto-detected — no `vercel.json` needed).
-2. Set the environment variable `BACKEND_URL` to your deployed backend URL (e.g.
-   `https://talentsift-api.onrender.com`). `next.config.ts` reads it at build time to configure
-   the `/api/*` rewrite proxy, so the browser only ever talks to your Vercel domain — the backend
-   never needs CORS headers, and session cookies stay same-origin automatically.
-3. Deploy. Sign in at `/admin/login`, provision organizations, and they sign in at `/org/login`.
+Blueprint, `COOKIE_SECURE` ve `MISTRAL_BASE_URL` değerlerini zaten tanımlar. Container başlarken migration'lar ve `talentsift admin provision --skip-if-exists` çalışır. İlk açılışta Render Logs bölümünde üretilen admin credential'ını kaydedin; parola tekrar gösterilmez.
+
+### Frontend: Vercel
+
+1. Repository'yi Vercel'e import edin ve **Root Directory** değerini `frontend` yapın.
+2. `BACKEND_URL` değişkenini Render backend URL'si olarak tanımlayın.
+3. Deploy edin ve `/admin/login` üzerinden giriş yaparak kurulumu doğrulayın.
+
+`frontend/next.config.ts`, `/api/*` isteklerini build sırasında `BACKEND_URL` değerine yönlendirir. Böylece tarayıcı yalnızca Vercel domain'iyle iletişim kurar; backend tarafında CORS ayarı yapmanız gerekmez.
+
+## Lisans
+
+Lisans bilgileri için [LICENSE](LICENSE) dosyasına bakın.
+
