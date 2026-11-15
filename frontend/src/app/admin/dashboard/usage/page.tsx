@@ -2,11 +2,13 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
-import { AlertCircle, Coins, Phone } from "lucide-react";
-import { Card } from "@/components/ui/card";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { StatusBadge } from "@/components/status-badge";
+import { Activity, AlertTriangle, CheckCircle2, Coins, RefreshCw, XCircle } from "lucide-react";
 import { StatCard } from "@/components/stat-card";
+import { StatusBadge } from "@/components/status-badge";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
   TableBody,
@@ -17,142 +19,312 @@ import {
 } from "@/components/ui/table";
 import { apiGet, ApiError } from "@/lib/api";
 import type { MistralUsageSummary } from "@/lib/types";
+import { cn } from "@/lib/utils";
 
-const WINDOW_OPTIONS = [
-  { value: "24", label: "Son 24 saat" },
-  { value: "168", label: "Son 7 gün" },
-  { value: "720", label: "Son 30 gün" },
-];
+function formatNumber(value: number | null | undefined): string {
+  if (value == null) return "—";
+  return new Intl.NumberFormat("tr-TR").format(value);
+}
+
+function formatDateTime(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString("tr-TR");
+}
 
 export default function AdminUsagePage() {
-  const [hours, setHours] = useState("24");
   const [summary, setSummary] = useState<MistralUsageSummary | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
 
-  const load = useCallback(async (windowHours: string) => {
+  const loadUsage = useCallback(async () => {
     try {
-      const data = await apiGet<MistralUsageSummary>(
-        `/api/admin/mistral-usage?hours=${windowHours}`,
-      );
+      const data = await apiGet<MistralUsageSummary>("/api/admin/mistral-usage");
       setSummary(data);
     } catch (error) {
-      toast.error(error instanceof ApiError ? error.message : "Kullanım verisi yüklenemedi.");
+      toast.error(error instanceof ApiError ? error.message : "Kullanım özeti yüklenemedi.");
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
     }
   }, []);
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- refetch on window change
-    load(hours);
-  }, [hours, load]);
+    let cancelled = false;
+    async function init() {
+      try {
+        const data = await apiGet<MistralUsageSummary>("/api/admin/mistral-usage");
+        if (!cancelled) setSummary(data);
+      } catch (error) {
+        if (!cancelled) {
+          toast.error(error instanceof ApiError ? error.message : "Kullanım özeti yüklenemedi.");
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+    void init();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  async function handleRefresh() {
+    setRefreshing(true);
+    await loadUsage();
+  }
+
+  const totals = summary?.totals ?? { call_count: 0, error_count: 0, total_tokens: 0 };
+  const successRate =
+    totals.call_count > 0
+      ? `${(((totals.call_count - totals.error_count) / totals.call_count) * 100).toFixed(1)}%`
+      : "—";
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-xl font-semibold tracking-tight text-foreground">Mistral Kullanımı</h1>
-          <p className="text-sm text-muted-foreground">
-            Platform genelinde yapılan tüm Mistral API çağrıları.
+          <h1 className="text-2xl font-semibold tracking-tight text-foreground">
+            Mistral LLM Kullanım Telemetrisi
+          </h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            AI jüri (Optimist, Pessimist, Hakem) çağrı sayıları, hata oranları ve token tüketimi.
           </p>
         </div>
-        <Select value={hours} onValueChange={(value) => value && setHours(value)}>
-          <SelectTrigger className="w-[160px]">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {WINDOW_OPTIONS.map((opt) => (
-              <SelectItem key={opt.value} value={opt.value}>
-                {opt.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={refreshing || loading}
+          onClick={() => void handleRefresh()}
+          className="w-fit gap-1.5"
+        >
+          <RefreshCw
+            className={cn("h-3.5 w-3.5", refreshing && "animate-spin")}
+            aria-hidden="true"
+          />
+          {refreshing ? "Yenileniyor..." : "Yenile"}
+        </Button>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-3">
-        <StatCard label="Toplam çağrı" value={summary?.totals.call_count ?? 0} icon={Phone} />
-        <StatCard label="Toplam token" value={summary?.totals.total_tokens ?? 0} icon={Coins} />
-        <StatCard label="Hatalı çağrı" value={summary?.totals.error_count ?? 0} icon={AlertCircle} />
-      </div>
+      {/* Totals */}
+      {loading ? (
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          {Array.from({ length: 4 }).map((_, index) => (
+            <Skeleton key={index} className="h-28 w-full rounded-xl" />
+          ))}
+        </div>
+      ) : (
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4 animate-fade-in-up">
+          <StatCard
+            label="Toplam Çağrı"
+            value={formatNumber(totals.call_count)}
+            icon={Activity}
+            className="hover-lift"
+          />
+          <StatCard
+            label="Başarılı Oran"
+            value={successRate}
+            icon={CheckCircle2}
+            className="hover-lift"
+          />
+          <StatCard
+            label="Hatalı Çağrı"
+            value={formatNumber(totals.error_count)}
+            icon={AlertTriangle}
+            className={cn(
+              "hover-lift",
+              totals.error_count > 0 && "border-red-500/40 bg-red-500/5",
+            )}
+          />
+          <StatCard
+            label="Toplam Token"
+            value={formatNumber(totals.total_tokens)}
+            icon={Coins}
+            className="hover-lift"
+          />
+        </div>
+      )}
 
-      <Card className="overflow-hidden border-border/60 p-0">
-        <Table>
-          <TableHeader>
-            <TableRow className="bg-muted/40">
-              <TableHead>Model</TableHead>
-              <TableHead>Çağrı</TableHead>
-              <TableHead>Hata</TableHead>
-              <TableHead>Token</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {summary?.by_model.map((row) => (
-              <TableRow key={row.model}>
-                <TableCell className="font-mono text-xs font-medium">{row.model}</TableCell>
-                <TableCell>{row.call_count}</TableCell>
-                <TableCell className={row.error_count > 0 ? "text-destructive" : undefined}>
-                  {row.error_count}
-                </TableCell>
-                <TableCell>{row.total_tokens.toLocaleString("tr-TR")}</TableCell>
-              </TableRow>
-            ))}
-            {summary?.by_model.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={4} className="py-10 text-center text-sm text-muted-foreground">
-                  Bu zaman aralığında çağrı yapılmamış.
-                </TableCell>
-              </TableRow>
-            ) : null}
-          </TableBody>
-        </Table>
+      {/* By model breakdown */}
+      <Card className="border-border/60 animate-fade-in-up animate-stagger-1">
+        <CardHeader>
+          <CardTitle className="text-base font-semibold">Model Bazlı Dağılım</CardTitle>
+        </CardHeader>
+        <CardContent className="p-0 sm:px-6 sm:pb-6">
+          {loading ? (
+            <div className="flex flex-col gap-3 px-6 pb-6">
+              <Skeleton className="h-10 w-full" />
+              <Skeleton className="h-10 w-full" />
+            </div>
+          ) : (summary?.by_model.length ?? 0) === 0 ? (
+            <div className="px-6 py-10 text-center text-sm text-muted-foreground">
+              Henüz kaydedilmiş Mistral API çağrısı yok.
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Model</TableHead>
+                    <TableHead>Çağrı</TableHead>
+                    <TableHead>Hata</TableHead>
+                    <TableHead>Token Payı</TableHead>
+                    <TableHead>Toplam Token</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {summary?.by_model.map((row) => {
+                    const share =
+                      totals.total_tokens > 0
+                        ? Math.round((row.total_tokens / totals.total_tokens) * 100)
+                        : 0;
+                    return (
+                      <TableRow key={row.model}>
+                        <TableCell className="font-mono text-xs font-medium text-foreground">
+                          {row.model}
+                        </TableCell>
+                        <TableCell className="tabular-nums">{formatNumber(row.call_count)}</TableCell>
+                        <TableCell className="tabular-nums">
+                          {row.error_count > 0 ? (
+                            <span className="font-medium text-red-700 dark:text-red-300">
+                              {formatNumber(row.error_count)}
+                            </span>
+                          ) : (
+                            formatNumber(row.error_count)
+                          )}
+                        </TableCell>
+                        <TableCell className="min-w-[160px]">
+                          <div className="flex items-center gap-2">
+                            <div className="h-2 flex-1 overflow-hidden rounded-full bg-muted">
+                              <div
+                                className="h-full rounded-full bg-primary transition-all"
+                                style={{ width: `${share}%` }}
+                              />
+                            </div>
+                            <span className="w-9 text-right text-xs text-muted-foreground tabular-nums">
+                              %{share}
+                            </span>
+                          </div>
+                        </TableCell>
+                        <TableCell className="tabular-nums font-medium">
+                          {formatNumber(row.total_tokens)}
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+        </CardContent>
       </Card>
 
-      <div>
-        <h2 className="mb-2 text-sm font-medium text-foreground">Son çağrılar</h2>
-        <Card className="overflow-hidden border-border/60 p-0">
-          <Table>
-            <TableHeader>
-              <TableRow className="bg-muted/40">
-                <TableHead>Model</TableHead>
-                <TableHead className="hidden sm:table-cell">Uç nokta</TableHead>
-                <TableHead className="hidden md:table-cell">Organizasyon</TableHead>
-                <TableHead>Token</TableHead>
-                <TableHead>Durum</TableHead>
-                <TableHead className="hidden lg:table-cell">Zaman</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {summary?.recent.map((call, index) => (
-                <TableRow key={index}>
-                  <TableCell className="font-mono text-xs">{call.model}</TableCell>
-                  <TableCell className="hidden text-muted-foreground sm:table-cell">
-                    {call.endpoint}
-                  </TableCell>
-                  <TableCell className="hidden text-muted-foreground md:table-cell">
-                    {call.organization_name ?? "—"}
-                  </TableCell>
-                  <TableCell>{call.total_tokens ?? "—"}</TableCell>
-                  <TableCell>
-                    {call.success ? (
-                      <StatusBadge tone="green">Başarılı</StatusBadge>
-                    ) : (
-                      <StatusBadge tone="red">Hata</StatusBadge>
-                    )}
-                  </TableCell>
-                  <TableCell className="hidden text-muted-foreground lg:table-cell">
-                    {new Date(call.created_at).toLocaleString("tr-TR")}
-                  </TableCell>
-                </TableRow>
+      {/* Recent calls */}
+      <Card className="border-border/60 animate-fade-in-up animate-stagger-2">
+        <CardHeader>
+          <CardTitle className="text-base font-semibold">Son API Çağrıları</CardTitle>
+        </CardHeader>
+        <CardContent className="p-0 sm:px-6 sm:pb-6">
+          {loading ? (
+            <div className="flex flex-col gap-3 px-6 pb-6">
+              {Array.from({ length: 4 }).map((_, index) => (
+                <Skeleton key={index} className="h-10 w-full" />
               ))}
-              {summary?.recent.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={6} className="py-10 text-center text-sm text-muted-foreground">
-                    Henüz çağrı yok.
-                  </TableCell>
-                </TableRow>
-              ) : null}
-            </TableBody>
-          </Table>
-        </Card>
-      </div>
+            </div>
+          ) : (summary?.recent.length ?? 0) === 0 ? (
+            <div className="px-6 py-10 text-center text-sm text-muted-foreground">
+              Kayıtlı çağrı bulunamadı.
+            </div>
+          ) : (
+            <>
+              {/* Desktop Table */}
+              <div className="hidden overflow-x-auto md:block">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Zaman</TableHead>
+                      <TableHead>Kurum</TableHead>
+                      <TableHead>Model</TableHead>
+                      <TableHead>Uç Nokta</TableHead>
+                      <TableHead>Token</TableHead>
+                      <TableHead>Durum</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {summary?.recent.map((call, index) => (
+                      <TableRow key={`${call.created_at}-${index}`}>
+                        <TableCell className="text-xs text-muted-foreground tabular-nums">
+                          {formatDateTime(call.created_at)}
+                        </TableCell>
+                        <TableCell className="text-sm text-foreground">
+                          {call.organization_name ?? "Platform"}
+                        </TableCell>
+                        <TableCell className="font-mono text-xs text-foreground">
+                          {call.model}
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant="outline" className="font-mono text-[11px]">
+                            {call.endpoint}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="tabular-nums">
+                          {formatNumber(call.total_tokens)}
+                        </TableCell>
+                        <TableCell>
+                          {call.success ? (
+                            <StatusBadge tone="green">Başarılı</StatusBadge>
+                          ) : (
+                            <StatusBadge tone="red">Hata</StatusBadge>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+
+              {/* Mobile Cards */}
+              <div className="flex flex-col gap-2.5 px-4 pb-4 md:hidden">
+                {summary?.recent.map((call, index) => (
+                  <div
+                    key={`${call.created_at}-${index}`}
+                    className="flex flex-col gap-2 rounded-xl border border-border/70 bg-card/70 p-3.5 text-xs"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-semibold text-foreground">
+                        {call.organization_name ?? "Platform"}
+                      </span>
+                      {call.success ? (
+                        <StatusBadge tone="green">
+                          <CheckCircle2 className="h-3 w-3" aria-hidden="true" />
+                          Başarılı
+                        </StatusBadge>
+                      ) : (
+                        <StatusBadge tone="red">
+                          <XCircle className="h-3 w-3" aria-hidden="true" />
+                          Hata
+                        </StatusBadge>
+                      )}
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2 text-muted-foreground">
+                      <span className="font-mono text-foreground">{call.model}</span>
+                      <Badge variant="outline" className="font-mono text-[10px]">
+                        {call.endpoint}
+                      </Badge>
+                      <span className="tabular-nums">{formatNumber(call.total_tokens)} token</span>
+                    </div>
+                    <span className="text-[11px] text-muted-foreground tabular-nums">
+                      {formatDateTime(call.created_at)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }

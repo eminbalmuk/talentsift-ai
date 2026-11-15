@@ -6,8 +6,9 @@ def test_candidate_password_hashing():
     pepper = "test_pepper"
     hashed = hash_secret(password, pepper=pepper)
 
-    assert len(hashed) == 64
+    assert hashed.startswith("pbkdf2$sha256$")
     assert verify_secret(password, hashed, pepper=pepper)
+    assert hash_secret(password, pepper=pepper) != hashed
     assert not verify_secret("WrongPassword", hashed, pepper=pepper)
 
 
@@ -42,9 +43,9 @@ def test_ingestion_result_structure():
     result = IngestionResult(
         raw_cv_text="John Doe METU CV...",
         structured_data=cv_data,
-        embedding=[0.1] * 1024,
+        embedding=[0.1] * 768,
     )
 
     assert result.structured_data.university == "METU"
-    assert len(result.embedding) == 1024
+    assert len(result.embedding) == 768
     assert result.raw_cv_text.startswith("John Doe")

@@ -3,9 +3,10 @@
 ALTER TABLE candidates 
 ADD COLUMN IF NOT EXISTS fts tsvector;
 
--- Populate tsvector column using english / simple text search configuration
-UPDATE candidates 
-SET fts = to_tsvector('english', coalesce(full_name, '') || ' ' || coalesce(university, '') || ' ' || coalesce(raw_cv_text, '') || ' ' || array_to_string(skills, ' '));
+-- Populate tsvector column using simple text search configuration when missing
+UPDATE candidates
+SET fts = to_tsvector('simple', coalesce(full_name, '') || ' ' || coalesce(university, '') || ' ' || coalesce(raw_cv_text, '') || ' ' || array_to_string(skills, ' '))
+WHERE fts IS NULL;
 
 -- Create GIN Index for fast full-text search matching
 CREATE INDEX IF NOT EXISTS idx_candidates_fts ON candidates USING GIN (fts);

@@ -10,7 +10,7 @@ from talentsift_ai.agents import DebateGraph
 from talentsift_ai.db.repository import CandidateRepository
 from talentsift_ai.mistral_client import MistralClient
 from talentsift_ai.observability import configure_phoenix
-from talentsift_ai.pipeline import HybridSearchService, ResumeIngestionPipeline
+from talentsift_ai.pipeline import HybridSearchService, ResumeIngestionPipeline, get_embedder
 from talentsift_ai.pipeline.search import load_job_description
 from talentsift_ai.schemas import JobPostingCreate
 from talentsift_ai.settings import get_settings
@@ -62,6 +62,75 @@ def init_db(
 
     run_async(_init())
     console.print(f"[green]Database schema initialized from {migration}[/green]")
+
+
+@db_app.command("reembed")
+def reembed_db(
+    all_records: Annotated[
+        bool,
+        typer.Option(
+            "--all",
+            help="Re-embed all profiles, candidates, and postings even if vectors already exist.",
+        ),
+    ] = False,
+) -> None:
+    """Re-compute CV and job-posting embeddings with the configured embedder (UltraBERT)."""
+
+    async def _reembed() -> None:
+        settings = get_settings()
+        use_mistral = settings.embedding_provider.lower() == "mistral"
+        mistral_ctx = create_mistral_client() if use_mistral else None
+        if mistral_ctx is not None:
+            await mistral_ctx.__aenter__()
+        try:
+            embedder = get_embedder(settings, mistral_client=mistral_ctx)
+            async with CandidateRepository(settings.database_url) as repository:
+                missing = await repository.list_records_missing_embeddings(
+                    include_all=all_records
+                )
+                profiles = missing["profiles"]
+                candidates = missing["candidates"]
+                postings = missing["postings"]
+
+                batch_size = 32
+                for idx in range(0, len(profiles), batch_size):
+                    chunk = profiles[idx : idx + batch_size]
+                    texts = [
+                        ResumeIngestionPipeline._embedding_text(
+                            row["raw_cv_text"], row["skills"] or []
+                        )
+                        for row in chunk
+                    ]
+                    vectors = await embedder.embed_documents(texts)
+                    for row, vec in zip(chunk, vectors, strict=True):
+                        await repository.update_profile_embedding(row["candidate_id"], vec)
+
+                for idx in range(0, len(candidates), batch_size):
+                    chunk = candidates[idx : idx + batch_size]
+                    texts = [
+                        ResumeIngestionPipeline._embedding_text(
+                            row["raw_cv_text"], row["skills"] or []
+                        )
+                        for row in chunk
+                    ]
+                    vectors = await embedder.embed_documents(texts)
+                    for row, vec in zip(chunk, vectors, strict=True):
+                        await repository.update_candidate_embedding(row["id"], vec)
+
+                for row in postings:
+                    vec = await embedder.embed_query(row["description"])
+                    await repository.set_posting_embedding(row["id"], vec)
+
+                console.print(
+                    "[green]Re-embedded[/green] "
+                    f"{len(profiles)} profiles, {len(candidates)} candidates, "
+                    f"{len(postings)} postings."
+                )
+        finally:
+            if mistral_ctx is not None:
+                await mistral_ctx.__aexit__(None, None, None)
+
+    run_async(_reembed())
 
 
 @admin_app.command("provision")
@@ -129,7 +198,9 @@ def add_organization(
 
 @admin_app.command("reset-organization-password")
 def reset_organization_password(
-    organization_id: Annotated[int, typer.Option(help="Organization ID to reset the login password for.")],
+    organization_id: Annotated[
+        int, typer.Option(help="Organization ID to reset the login password for.")
+    ],
 ) -> None:
     """Reset an organization's password hash under the current PRODUCT_KEY_PEPPER."""
 
@@ -141,7 +212,9 @@ def reset_organization_password(
                 credential_pepper=settings.product_key_pepper,
             )
             if result is None:
-                raise typer.BadParameter(f"No organization user found for organization {organization_id}.")
+                raise typer.BadParameter(
+                    f"No organization user found for organization {organization_id}."
+                )
             console.print("[green]Password reset[/green]")
             console.print(f"Username: {result['username']}")
             console.print(f"New password: {result['password']}")
@@ -189,6 +262,11 @@ def login_check(
             )
             if identity is None:
                 raise typer.BadParameter("Invalid username or password.")
+            if identity.get("is_pending"):
+                reason = identity.get("blocked_reason", "pending")
+                raise typer.BadParameter(
+                    f"Organization cannot log in right now (status: {reason})."
+                )
             console.print(
                 "[green]Login accepted[/green] "
                 f"for organization #{identity['organization_id']} "
@@ -294,9 +372,23 @@ def rank(
 
     async def _rank() -> None:
         settings = get_settings()
-        async with create_mistral_client() as mistral:
-            async with CandidateRepository(settings.database_url) as repository:
-                service = HybridSearchService(mistral_client=mistral, repository=repository)
+        async with CandidateRepository(settings.database_url) as repository:
+            if settings.embedding_provider.lower() == "mistral":
+                async with create_mistral_client() as mistral:
+                    service = HybridSearchService(
+                        mistral_client=mistral, repository=repository
+                    )
+                    results = await service.rank(
+                        organization_id=organization_id,
+                        job_posting_id=job_posting_id,
+                        job_description=load_job_description(job_description),
+                        min_gpa=min_gpa,
+                        class_year=class_year,
+                        min_experience_years=min_experience_years,
+                        limit=limit,
+                    )
+            else:
+                service = HybridSearchService(repository=repository)
                 results = await service.rank(
                     organization_id=organization_id,
                     job_posting_id=job_posting_id,
@@ -306,7 +398,7 @@ def rank(
                     min_experience_years=min_experience_years,
                     limit=limit,
                 )
-                render_rankings(results)
+            render_rankings(results)
 
     run_async(_rank())
 

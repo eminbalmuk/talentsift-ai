@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { toast } from "sonner";
 import { ArrowLeft, Lock, Mail, Sparkles, User, UserPlus } from "lucide-react";
+import { AuroraBackground } from "@/components/aurora-background";
 import { LogoFull } from "@/components/logo";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -45,7 +46,7 @@ export default function CandidateLoginPage() {
         full_name: fullName,
       });
       toast.success("Kayıt başarılı! Profilinize yönlendiriliyorsunuz.");
-      router.push("/candidate/dashboard");
+      router.push("/candidate/dashboard?tab=profile");
     } catch (error) {
       toast.error(error instanceof ApiError ? error.message : "Kayıt olunamadı.");
     } finally {
@@ -54,13 +55,14 @@ export default function CandidateLoginPage() {
   }
 
   return (
-    <div className="relative flex min-h-screen flex-col items-center justify-center bg-background p-4 sm:p-8">
+    <div className="relative isolate flex min-h-screen flex-col items-center justify-center overflow-hidden bg-background p-4 sm:p-8">
+      <AuroraBackground />
       <div className="absolute left-6 top-6">
         <Link
           href="/"
-          className="inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
+          className="inline-flex items-center gap-1.5 rounded-sm px-1.5 py-1 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
-          <ArrowLeft className="h-3.5 w-3.5" />
+          <ArrowLeft className="h-3.5 w-3.5" aria-hidden="true" />
           Ana sayfaya dön
         </Link>
       </div>
@@ -72,24 +74,32 @@ export default function CandidateLoginPage() {
           </div>
           <h1 className="text-2xl font-bold tracking-tight text-foreground">Aday Portalı</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            CV'nizi 1 kere yükleyin, tüm şirket ilanlarına tek tıkla başvurun.
+            CV&apos;nizi 1 kez yükleyin, tüm açık ilanlara tek tıkla başvurun.
           </p>
         </div>
 
-        <Tabs value={mode} onValueChange={(val) => setMode(val as "login" | "register")} className="w-full">
-          <TabsList className="grid w-full grid-cols-2 mb-4">
+        <Tabs
+          value={mode}
+          onValueChange={(val) => {
+            if (val === "login" || val === "register") {
+              setMode(val);
+            }
+          }}
+          className="w-full"
+        >
+          <TabsList className="mb-4 grid w-full grid-cols-2">
             <TabsTrigger value="login" className="gap-1.5 text-xs">
-              <User className="h-3.5 w-3.5" />
+              <User className="h-3.5 w-3.5" aria-hidden="true" />
               Giriş Yap
             </TabsTrigger>
             <TabsTrigger value="register" className="gap-1.5 text-xs">
-              <UserPlus className="h-3.5 w-3.5" />
+              <UserPlus className="h-3.5 w-3.5" aria-hidden="true" />
               Kayıt Ol
             </TabsTrigger>
           </TabsList>
 
           <TabsContent value="login">
-            <Card className="border-border/60 shadow-lg backdrop-blur-sm">
+            <Card className="border-border/60 bg-card/90 shadow-lg backdrop-blur-sm">
               <CardHeader className="pb-3">
                 <CardTitle className="text-lg">Hesabınıza Giriş Yapın</CardTitle>
                 <CardDescription className="text-xs">
@@ -103,10 +113,14 @@ export default function CandidateLoginPage() {
                       E-posta Adresi
                     </Label>
                     <div className="relative">
-                      <Mail className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+                      <Mail
+                        className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-muted-foreground"
+                        aria-hidden="true"
+                      />
                       <Input
                         id="login-email"
                         type="email"
+                        autoComplete="email"
                         placeholder="ornek@email.com"
                         value={email}
                         onChange={(e) => setEmail(e.target.value)}
@@ -121,10 +135,14 @@ export default function CandidateLoginPage() {
                       Şifre
                     </Label>
                     <div className="relative">
-                      <Lock className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+                      <Lock
+                        className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-muted-foreground"
+                        aria-hidden="true"
+                      />
                       <Input
                         id="login-password"
                         type="password"
+                        autoComplete="current-password"
                         placeholder="••••••••"
                         value={password}
                         onChange={(e) => setPassword(e.target.value)}
@@ -136,7 +154,7 @@ export default function CandidateLoginPage() {
 
                   <Button type="submit" disabled={submitting} className="mt-2 w-full gap-2 font-medium">
                     {submitting ? "Giriş yapılıyor..." : "Giriş Yap"}
-                    <Sparkles className="h-4 w-4" />
+                    <Sparkles className="h-4 w-4" aria-hidden="true" />
                   </Button>
                 </form>
               </CardContent>
@@ -144,11 +162,11 @@ export default function CandidateLoginPage() {
           </TabsContent>
 
           <TabsContent value="register">
-            <Card className="border-border/60 shadow-lg backdrop-blur-sm">
+            <Card className="border-border/60 bg-card/90 shadow-lg backdrop-blur-sm">
               <CardHeader className="pb-3">
                 <CardTitle className="text-lg">Yeni Aday Hesabı Oluşturun</CardTitle>
                 <CardDescription className="text-xs">
-                  CV'nizi profilleştirmek ve ilanlara başvurmak için kaydolun.
+                  CV&apos;nizi profilleştirmek ve ilanlara başvurmak için kaydolun.
                 </CardDescription>
               </CardHeader>
               <CardContent>
@@ -158,9 +176,13 @@ export default function CandidateLoginPage() {
                       Ad Soyad
                     </Label>
                     <div className="relative">
-                      <User className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+                      <User
+                        className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-muted-foreground"
+                        aria-hidden="true"
+                      />
                       <Input
                         id="reg-fullname"
+                        autoComplete="name"
                         placeholder="Ahmet Yılmaz"
                         value={fullName}
                         onChange={(e) => setFullName(e.target.value)}
@@ -175,10 +197,14 @@ export default function CandidateLoginPage() {
                       E-posta Adresi
                     </Label>
                     <div className="relative">
-                      <Mail className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+                      <Mail
+                        className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-muted-foreground"
+                        aria-hidden="true"
+                      />
                       <Input
                         id="reg-email"
                         type="email"
+                        autoComplete="email"
                         placeholder="ahmet@email.com"
                         value={email}
                         onChange={(e) => setEmail(e.target.value)}
@@ -193,10 +219,14 @@ export default function CandidateLoginPage() {
                       Şifre (en az 6 karakter)
                     </Label>
                     <div className="relative">
-                      <Lock className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+                      <Lock
+                        className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-muted-foreground"
+                        aria-hidden="true"
+                      />
                       <Input
                         id="reg-password"
                         type="password"
+                        autoComplete="new-password"
                         placeholder="••••••••"
                         value={password}
                         onChange={(e) => setPassword(e.target.value)}
@@ -209,13 +239,23 @@ export default function CandidateLoginPage() {
 
                   <Button type="submit" disabled={submitting} className="mt-2 w-full gap-2 font-medium">
                     {submitting ? "Kayıt yapılıyor..." : "Kayıt Ol ve Başla"}
-                    <Sparkles className="h-4 w-4" />
+                    <Sparkles className="h-4 w-4" aria-hidden="true" />
                   </Button>
                 </form>
               </CardContent>
             </Card>
           </TabsContent>
         </Tabs>
+
+        <p className="mt-5 text-center text-xs text-muted-foreground">
+          Şirket hesabı için{" "}
+          <Link
+            href="/org/login"
+            className="font-medium text-foreground underline underline-offset-4 hover:text-primary"
+          >
+            Kurumsal Giriş
+          </Link>
+        </p>
       </div>
     </div>
   );

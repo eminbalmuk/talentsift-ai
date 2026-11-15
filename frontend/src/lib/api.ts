@@ -7,30 +7,62 @@ export class ApiError extends Error {
   }
 }
 
+function extractErrorMessage(data: unknown): string {
+  if (!data || typeof data !== "object") {
+    return "İstek başarısız oldu.";
+  }
+  if (!("detail" in data)) {
+    return "İstek başarısız oldu.";
+  }
+  const detail = (data as { detail: unknown }).detail;
+  if (typeof detail === "string") {
+    return detail;
+  }
+  if (Array.isArray(detail)) {
+    const messages = detail
+      .map((item) => {
+        if (typeof item === "string") return item;
+        if (item && typeof item === "object" && "msg" in item) {
+          const msg = String((item as { msg: unknown }).msg);
+          const loc =
+            "loc" in item && Array.isArray((item as { loc: unknown }).loc)
+              ? (item as { loc: unknown[] }).loc.slice(1).join(".")
+              : "";
+          return loc ? `${loc}: ${msg}` : msg;
+        }
+        return "";
+      })
+      .filter(Boolean);
+    if (messages.length > 0) {
+      return messages.join(" • ");
+    }
+  }
+  return "İstek doğrulanamadı.";
+}
+
+async function parseResponse<T>(response: Response): Promise<T> {
+  const text = await response.text();
+  let data: unknown = null;
+  try {
+    data = text ? JSON.parse(text) : null;
+  } catch {
+    data = { detail: text || "İstek başarısız oldu." };
+  }
+
+  if (!response.ok) {
+    throw new ApiError(response.status, extractErrorMessage(data));
+  }
+
+  return data as T;
+}
+
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const response = await fetch(path, {
     ...options,
     headers: { "Content-Type": "application/json", ...(options.headers || {}) },
     credentials: "same-origin",
   });
-
-  const text = await response.text();
-  let data: unknown = null;
-  try {
-    data = text ? JSON.parse(text) : null;
-  } catch {
-    data = { detail: text || "Request failed" };
-  }
-
-  if (!response.ok) {
-    const detail =
-      data && typeof data === "object" && "detail" in data
-        ? String((data as { detail: unknown }).detail)
-        : "Request failed";
-    throw new ApiError(response.status, detail);
-  }
-
-  return data as T;
+  return parseResponse<T>(response);
 }
 
 export function apiGet<T>(path: string): Promise<T> {
@@ -55,22 +87,5 @@ export async function apiUpload<T>(path: string, formData: FormData): Promise<T>
     body: formData,
     credentials: "same-origin",
   });
-
-  const text = await response.text();
-  let data: unknown = null;
-  try {
-    data = text ? JSON.parse(text) : null;
-  } catch {
-    data = { detail: text || "Request failed" };
-  }
-
-  if (!response.ok) {
-    const detail =
-      data && typeof data === "object" && "detail" in data
-        ? String((data as { detail: unknown }).detail)
-        : "Request failed";
-    throw new ApiError(response.status, detail);
-  }
-
-  return data as T;
+  return parseResponse<T>(response);
 }

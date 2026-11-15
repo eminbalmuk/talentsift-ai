@@ -64,3 +64,23 @@ def test_pre_llm_reranker_sorting():
     assert "competency_score" in reranked[0]
     assert "relevance_score" in reranked[0]
     assert reranked[0]["pre_llm_score"] >= reranked[1]["pre_llm_score"]
+
+
+def test_calculate_competency_score_uses_word_boundaries():
+    # "installed", "ahead", "scheduled" contain substrings "led" and "head"
+    # and must NOT trigger seniority keyword matches.
+    non_senior = {
+        "experience_years": 0,
+        "gpa": 3.0,
+        "current_class": 3,
+        "skills": [],
+        "raw_cv_text": "Installed software, moved ahead on scheduled tasks.",
+    }
+    plain = {
+        "experience_years": 0,
+        "gpa": 3.0,
+        "current_class": 3,
+        "skills": [],
+        "raw_cv_text": "Built simple class projects.",
+    }
+    assert calculate_competency_score(non_senior) == calculate_competency_score(plain)

@@ -1,3 +1,6 @@
+import json
+import logging
+import re
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -18,6 +21,7 @@ from talentsift_ai.auth import (
     verify_secret,
 )
 from talentsift_ai.db.vector import to_pgvector
+from talentsift_ai.pipeline.sparse import tr_lower
 from talentsift_ai.schemas import (
     Candidate,
     CandidateCreate,
@@ -25,6 +29,14 @@ from talentsift_ai.schemas import (
     JobPosting,
     JobPostingCreate,
 )
+
+logger = logging.getLogger(__name__)
+
+
+def _utc_iso(value: Any) -> Any:
+    if isinstance(value, datetime):
+        return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
+    return value
 
 
 async def init_connection(connection: asyncpg.Connection) -> None:
@@ -82,6 +94,11 @@ class CandidateRepository:
         sql = migration_path.read_text(encoding="utf-8")
         async with self._pool.acquire() as connection:
             await connection.execute(sql)
+
+    async def ping(self) -> bool:
+        await self._ensure_connected()
+        async with self._pool.acquire() as connection:
+            return bool(await connection.fetchval("SELECT 1"))
 
     async def admin_user_exists(self) -> bool:
         await self._ensure_connected()
@@ -297,7 +314,7 @@ class CandidateRepository:
                 """
                 SELECT u.id AS user_id, u.organization_id, o.display_name,
                        u.username, u.password_hash, o.is_active AS org_is_active,
-                       o.license_status, u.is_active AS user_is_active
+                       o.license_status, o.license_expires_at, u.is_active AS user_is_active
                 FROM organization_users u
                 JOIN organizations o ON o.id = u.organization_id
                 WHERE u.username_normalized = $1
@@ -310,8 +327,30 @@ class CandidateRepository:
             if not verify_secret(password, row["password_hash"], pepper=credential_pepper):
                 return None
 
-            if not row["org_is_active"] or row["license_status"] == "pending" or not row["user_is_active"]:
-                return {"is_pending": True, "display_name": row["display_name"]}
+            expires_at = _utc_iso(row["license_expires_at"])
+            is_expired_by_date = expires_at is not None and expires_at < datetime.now(UTC)
+            if row["license_status"] == "pending":
+                return {
+                    "is_pending": True,
+                    "blocked_reason": "pending",
+                    "display_name": row["display_name"],
+                }
+            if (
+                not row["org_is_active"]
+                or not row["user_is_active"]
+                or row["license_status"] == "suspended"
+            ):
+                return {
+                    "is_pending": True,
+                    "blocked_reason": "suspended",
+                    "display_name": row["display_name"],
+                }
+            if row["license_status"] == "expired" or is_expired_by_date:
+                return {
+                    "is_pending": True,
+                    "blocked_reason": "expired",
+                    "display_name": row["display_name"],
+                }
 
             await connection.execute(
                 "UPDATE organization_users SET last_login_at = CURRENT_TIMESTAMP WHERE id = $1",
@@ -321,6 +360,19 @@ class CandidateRepository:
         data = dict(row)
         data.pop("password_hash")
         return data
+
+    async def get_organization_access_status(self, organization_id: int) -> dict[str, Any] | None:
+        await self._ensure_connected()
+        async with self._pool.acquire() as connection:
+            row = await connection.fetchrow(
+                """
+                SELECT id, display_name, is_active, license_status, license_expires_at
+                FROM organizations
+                WHERE id = $1
+                """,
+                organization_id,
+            )
+        return None if row is None else dict(row)
 
     async def list_organizations(self) -> list[dict[str, Any]]:
         await self._ensure_connected()
@@ -336,15 +388,27 @@ class CandidateRepository:
                        o.notes,
                        o.is_active,
                        o.created_at,
-                       u.username,
-                       u.password_prefix,
-                       COUNT(DISTINCT c.id) AS candidate_count,
-                       COUNT(DISTINCT d.id) AS debate_count
+                       (
+                           SELECT u.username FROM organization_users u
+                           WHERE u.organization_id = o.id
+                           ORDER BY u.id ASC LIMIT 1
+                       ) AS username,
+                       (
+                           SELECT u.password_prefix FROM organization_users u
+                           WHERE u.organization_id = o.id
+                           ORDER BY u.id ASC LIMIT 1
+                       ) AS password_prefix,
+                       (
+                           (SELECT COUNT(*) FROM candidates c WHERE c.organization_id = o.id)
+                           + (
+                               SELECT COUNT(*) FROM job_applications a
+                               WHERE a.organization_id = o.id
+                           )
+                       ) AS candidate_count,
+                       (
+                           SELECT COUNT(*) FROM debate_results d WHERE d.organization_id = o.id
+                       ) AS debate_count
                 FROM organizations o
-                LEFT JOIN organization_users u ON u.organization_id = o.id
-                LEFT JOIN candidates c ON c.organization_id = o.id
-                LEFT JOIN debate_results d ON d.organization_id = o.id
-                GROUP BY o.id, u.username, u.password_prefix
                 ORDER BY o.created_at DESC
                 """
             )
@@ -479,12 +543,79 @@ class CandidateRepository:
                 to_pgvector(embedding),
             )
 
+    async def list_records_missing_embeddings(
+        self, *, include_all: bool = False
+    ) -> dict[str, list[dict[str, Any]]]:
+        """Returns candidate_profiles, legacy candidates, and job_postings needing embeddings."""
+        await self._ensure_connected()
+        profile_filter = "" if include_all else "cv_embedding IS NULL AND "
+        posting_filter = "" if include_all else "description_embedding IS NULL AND "
+        async with self._pool.acquire() as connection:
+            profiles = await connection.fetch(
+                f"""
+                SELECT candidate_id, skills, raw_cv_text
+                FROM candidate_profiles
+                WHERE {profile_filter}btrim(raw_cv_text) <> ''
+                """
+            )
+            candidates = await connection.fetch(
+                f"""
+                SELECT id, skills, raw_cv_text
+                FROM candidates
+                WHERE {profile_filter}btrim(raw_cv_text) <> ''
+                """
+            )
+            postings = await connection.fetch(
+                f"""
+                SELECT id, description
+                FROM job_postings
+                WHERE {posting_filter}btrim(description) <> ''
+                """
+            )
+        return {
+            "profiles": [dict(r) for r in profiles],
+            "candidates": [dict(r) for r in candidates],
+            "postings": [dict(r) for r in postings],
+        }
+
+    async def list_candidate_applications_for_rescore(
+        self, candidate_id: int
+    ) -> list[dict[str, Any]]:
+        await self._ensure_connected()
+        async with self._pool.acquire() as connection:
+            rows = await connection.fetch(
+                """
+                SELECT a.job_posting_id, a.organization_id, j.description
+                FROM job_applications a
+                JOIN job_postings j ON j.id = a.job_posting_id
+                WHERE a.candidate_id = $1
+                """,
+                candidate_id,
+            )
+        return [dict(row) for row in rows]
+
+    async def update_profile_embedding(self, candidate_id: int, embedding: list[float]) -> None:
+        await self._ensure_connected()
+        async with self._pool.acquire() as connection:
+            await connection.execute(
+                "UPDATE candidate_profiles SET cv_embedding = $2::vector WHERE candidate_id = $1",
+                candidate_id,
+                to_pgvector(embedding),
+            )
+
+    async def update_candidate_embedding(self, candidate_id: int, embedding: list[float]) -> None:
+        await self._ensure_connected()
+        async with self._pool.acquire() as connection:
+            await connection.execute(
+                "UPDATE candidates SET cv_embedding = $2::vector WHERE id = $1",
+                candidate_id,
+                to_pgvector(embedding),
+            )
+
     async def bulk_upsert_application_scores(
         self, *, job_posting_id: int, scored_candidates: list[dict[str, Any]]
     ) -> None:
-        """scored_candidates: dicts with id/relevance_score/competency_score/pre_llm_score,
-        as returned by PreLLMReranker.rerank() -- persists every ranked candidate's score,
-        not just the ones that go on to the LLM debate stage."""
+        """Persists pre-LLM and hybrid explainability scores returned by PreLLMReranker."""
         if not scored_candidates:
             return
         await self._ensure_connected()
@@ -492,7 +623,15 @@ class CandidateRepository:
             await connection.executemany(
                 """
                 UPDATE job_applications
-                SET relevance_score = $3, competency_score = $4, pre_llm_score = $5,
+                SET relevance_score = $3,
+                    competency_score = $4,
+                    pre_llm_score = $5,
+                    dense_score = $6,
+                    sparse_score = $7,
+                    bm25_score = $8,
+                    tfidf_score = $9,
+                    matched_skills = $10::jsonb,
+                    missing_skills = $11::jsonb,
                     score_computed_at = CURRENT_TIMESTAMP
                 WHERE job_posting_id = $1 AND candidate_id = $2
                 """,
@@ -503,6 +642,12 @@ class CandidateRepository:
                         c.get("relevance_score"),
                         c.get("competency_score"),
                         c.get("pre_llm_score"),
+                        c.get("dense_score"),
+                        c.get("sparse_score"),
+                        c.get("bm25_score"),
+                        c.get("tfidf_score"),
+                        json.dumps(c.get("matched_skills") or []),
+                        json.dumps(c.get("missing_skills") or []),
                     )
                     for c in scored_candidates
                 ],
@@ -516,13 +661,23 @@ class CandidateRepository:
         relevance_score: float | None,
         competency_score: float | None,
         pre_llm_score: float | None,
+        dense_score: float | None = None,
+        sparse_score: float | None = None,
+        matched_skills: list[str] | None = None,
+        missing_skills: list[str] | None = None,
     ) -> None:
         await self._ensure_connected()
         async with self._pool.acquire() as connection:
             await connection.execute(
                 """
                 UPDATE job_applications
-                SET relevance_score = $3, competency_score = $4, pre_llm_score = $5,
+                SET relevance_score = $3,
+                    competency_score = $4,
+                    pre_llm_score = $5,
+                    dense_score = COALESCE($6, dense_score),
+                    sparse_score = COALESCE($7, sparse_score),
+                    matched_skills = COALESCE($8::jsonb, matched_skills),
+                    missing_skills = COALESCE($9::jsonb, missing_skills),
                     score_computed_at = CURRENT_TIMESTAMP
                 WHERE job_posting_id = $1 AND candidate_id = $2
                 """,
@@ -531,6 +686,10 @@ class CandidateRepository:
                 relevance_score,
                 competency_score,
                 pre_llm_score,
+                dense_score,
+                sparse_score,
+                None if matched_skills is None else json.dumps(matched_skills),
+                None if missing_skills is None else json.dumps(missing_skills),
             )
 
     # Candidates for a posting can live in either of two tables: the legacy `candidates`
@@ -543,12 +702,16 @@ class CandidateRepository:
                            + (SELECT COUNT(*) FROM job_applications a WHERE a.job_posting_id = p.id)
                        ) AS candidate_count,
                        (
-                           (SELECT COUNT(*) FROM debate_results d
+                           (SELECT COUNT(DISTINCT d.candidate_id) FROM debate_results d
                             JOIN candidates c ON c.id = d.candidate_id
-                            WHERE c.job_posting_id = p.id AND d.organization_id = p.organization_id)
-                           + (SELECT COUNT(*) FROM debate_results d
+                            WHERE c.job_posting_id = p.id
+                              AND d.organization_id = p.organization_id
+                              AND (d.job_posting_id = p.id OR d.job_posting_id IS NULL))
+                           + (SELECT COUNT(DISTINCT d.candidate_id) FROM debate_results d
                               JOIN job_applications a ON a.candidate_id = d.candidate_id
-                              WHERE a.job_posting_id = p.id AND d.organization_id = p.organization_id)
+                              WHERE a.job_posting_id = p.id
+                                AND d.organization_id = p.organization_id
+                                AND d.job_posting_id = p.id)
                        ) AS debate_count
     """
 
@@ -669,59 +832,24 @@ class CandidateRepository:
     ) -> list[dict[str, Any]]:
         await self._ensure_connected()
         app_where = ["a.organization_id = $1", "a.job_posting_id = $2"]
-        app_values: list[Any] = [organization_id, job_posting_id]
-        param_index = 2
-
-        if min_gpa is not None:
-            param_index += 1
-            app_where.append(f"p.gpa >= ${param_index}")
-            app_values.append(min_gpa)
-        if class_year is not None:
-            param_index += 1
-            app_where.append(f"p.current_class = ${param_index}")
-            app_values.append(class_year)
-        if min_experience_years is not None:
-            param_index += 1
-            app_where.append(f"p.experience_years >= ${param_index}")
-            app_values.append(min_experience_years)
-
-        limit_index = param_index + 1
-        offset_index = param_index + 2
-        app_values.extend([limit, offset])
-
-        app_sql = f"""
-            SELECT p.candidate_id AS id, u.full_name, p.university, p.gpa, p.current_class,
-                   p.experience_years, p.skills, p.source_path, a.applied_at AS created_at,
-                   a.relevance_score, a.competency_score, a.pre_llm_score
-            FROM job_applications a
-            JOIN candidate_profiles p ON p.candidate_id = a.candidate_id
-            JOIN candidate_users u ON u.id = a.candidate_id
-            WHERE {" AND ".join(app_where)}
-            ORDER BY a.applied_at DESC
-            LIMIT ${limit_index} OFFSET ${offset_index}
-        """
-
-        async with self._pool.acquire() as connection:
-            rows = await connection.fetch(app_sql, *app_values)
-            if rows:
-                return [dict(row) for row in rows]
-
-        # Secondary: Fallback to candidates table
-        where_clauses = ["organization_id = $1", "job_posting_id = $2"]
+        cand_where = ["organization_id = $1", "job_posting_id = $2"]
         values: list[Any] = [organization_id, job_posting_id]
         param_index = 2
 
         if min_gpa is not None:
             param_index += 1
-            where_clauses.append(f"gpa >= ${param_index}")
+            app_where.append(f"p.gpa >= ${param_index}")
+            cand_where.append(f"gpa >= ${param_index}")
             values.append(min_gpa)
         if class_year is not None:
             param_index += 1
-            where_clauses.append(f"current_class = ${param_index}")
+            app_where.append(f"p.current_class = ${param_index}")
+            cand_where.append(f"current_class = ${param_index}")
             values.append(class_year)
         if min_experience_years is not None:
             param_index += 1
-            where_clauses.append(f"experience_years >= ${param_index}")
+            app_where.append(f"p.experience_years >= ${param_index}")
+            cand_where.append(f"experience_years >= ${param_index}")
             values.append(min_experience_years)
 
         limit_index = param_index + 1
@@ -730,9 +858,36 @@ class CandidateRepository:
 
         sql = f"""
             SELECT id, full_name, university, gpa, current_class, experience_years,
-                   skills, source_path, created_at
-            FROM candidates
-            WHERE {" AND ".join(where_clauses)}
+                   skills, source_path, created_at,
+                   relevance_score, competency_score, pre_llm_score,
+                   dense_score, sparse_score, matched_skills, missing_skills,
+                   candidate_source
+            FROM (
+                SELECT p.candidate_id AS id, u.full_name, p.university, p.gpa, p.current_class,
+                       p.experience_years, p.skills, p.source_path, a.applied_at AS created_at,
+                       a.relevance_score, a.competency_score, a.pre_llm_score,
+                       a.dense_score, a.sparse_score, a.matched_skills, a.missing_skills,
+                       'portal'::text AS candidate_source
+                FROM job_applications a
+                JOIN candidate_profiles p ON p.candidate_id = a.candidate_id
+                JOIN candidate_users u ON u.id = a.candidate_id
+                WHERE {" AND ".join(app_where)}
+
+                UNION ALL
+
+                SELECT id, full_name, university, gpa, current_class, experience_years,
+                       skills, source_path, created_at,
+                       NULL::double precision AS relevance_score,
+                       NULL::double precision AS competency_score,
+                       NULL::double precision AS pre_llm_score,
+                       NULL::double precision AS dense_score,
+                       NULL::double precision AS sparse_score,
+                       '[]'::jsonb AS matched_skills,
+                       '[]'::jsonb AS missing_skills,
+                       'legacy'::text AS candidate_source
+                FROM candidates
+                WHERE {" AND ".join(cand_where)}
+            ) combined
             ORDER BY created_at DESC
             LIMIT ${limit_index} OFFSET ${offset_index}
         """
@@ -757,32 +912,52 @@ class CandidateRepository:
         return {row["candidate_id"] for row in rows}
 
     async def latest_debate_result(
-        self, candidate_id: int, organization_id: int
+        self, candidate_id: int, organization_id: int, job_posting_id: int | None = None
     ) -> dict[str, Any] | None:
         await self._ensure_connected()
         async with self._pool.acquire() as connection:
-            row = await connection.fetchrow(
-                """
-                SELECT id, optimist_score, optimist_arguments, pessimist_score,
-                       pessimist_arguments, final_score, arbitrator_rationale,
-                       is_selected, created_at, pre_llm_score, relevance_score,
-                       competency_score
-                FROM debate_results
-                WHERE candidate_id = $1 AND organization_id = $2
-                ORDER BY created_at DESC
-                LIMIT 1
-                """,
-                candidate_id,
-                organization_id,
-            )
+            if job_posting_id is not None:
+                row = await connection.fetchrow(
+                    """
+                    SELECT id, optimist_score, optimist_arguments, pessimist_score,
+                           pessimist_arguments, final_score, arbitrator_rationale,
+                           is_selected, created_at, pre_llm_score, relevance_score,
+                           competency_score, dense_score, sparse_score,
+                           matched_skills, missing_skills, evidence_quotes, grounding_score
+                    FROM debate_results
+                    WHERE candidate_id = $1
+                      AND organization_id = $2
+                      AND (job_posting_id = $3 OR job_posting_id IS NULL)
+                    ORDER BY (job_posting_id = $3) DESC NULLS LAST, created_at DESC
+                    LIMIT 1
+                    """,
+                    candidate_id,
+                    organization_id,
+                    job_posting_id,
+                )
+            else:
+                row = await connection.fetchrow(
+                    """
+                    SELECT id, optimist_score, optimist_arguments, pessimist_score,
+                           pessimist_arguments, final_score, arbitrator_rationale,
+                           is_selected, created_at, pre_llm_score, relevance_score,
+                           competency_score, dense_score, sparse_score,
+                           matched_skills, missing_skills, evidence_quotes, grounding_score
+                    FROM debate_results
+                    WHERE candidate_id = $1 AND organization_id = $2
+                    ORDER BY created_at DESC
+                    LIMIT 1
+                    """,
+                    candidate_id,
+                    organization_id,
+                )
         return None if row is None else dict(row)
 
     async def reset_posting_evaluations(
         self, *, organization_id: int, job_posting_id: int
     ) -> dict[str, int]:
-        """Wipes every LLM evaluation, notification, and decision (selected/rejected) for a
-        posting, resetting all its applications back to 'applied' -- a clean slate for
-        re-testing the shortlist/finalize flow without earlier runs' leftovers."""
+        """Wipes every LLM evaluation, interview schedule, notification, and decision for a
+        posting, resetting all its applications back to 'applied'."""
         await self._ensure_connected()
         async with self._pool.acquire() as connection:
             async with connection.transaction():
@@ -794,23 +969,31 @@ class CandidateRepository:
                     organization_id,
                     job_posting_id,
                 )
-                # Covers debate_results tagged with the new job_posting_id column AND
-                # legacy rows predating that column (job_posting_id IS NULL there), which
-                # top_results() still surfaces via its candidates/job_applications fallback
-                # joins -- must match that same logic or old rows would survive the reset.
+                await connection.execute(
+                    """
+                    DELETE FROM interview_schedules
+                    WHERE organization_id = $1 AND job_posting_id = $2
+                    """,
+                    organization_id,
+                    job_posting_id,
+                )
                 deleted_debates = await connection.execute(
                     """
                     DELETE FROM debate_results d
                     WHERE d.organization_id = $1
                       AND (
                           d.job_posting_id = $2
-                          OR d.candidate_id IN (
-                              SELECT id FROM candidates
-                              WHERE organization_id = $1 AND job_posting_id = $2
-                          )
-                          OR d.candidate_id IN (
-                              SELECT candidate_id FROM job_applications
-                              WHERE organization_id = $1 AND job_posting_id = $2
+                          OR (
+                              d.job_posting_id IS NULL AND (
+                                  d.candidate_id IN (
+                                      SELECT id FROM candidates
+                                      WHERE organization_id = $1 AND job_posting_id = $2
+                                  )
+                                  OR d.candidate_id IN (
+                                      SELECT candidate_id FROM job_applications
+                                      WHERE organization_id = $1 AND job_posting_id = $2
+                                  )
+                              )
                           )
                       )
                     """,
@@ -854,13 +1037,20 @@ class CandidateRepository:
             async with connection.transaction():
                 evaluated = await connection.fetch(
                     f"""
-                    SELECT a.id AS application_id, a.candidate_id, a.status,
-                           d.id AS debate_result_id, d.final_score,
-                           {self._RANKING_SCORE_EXPR}
-                    FROM debate_results d
-                    JOIN job_applications a ON a.candidate_id = d.candidate_id
-                    WHERE d.organization_id = $1 AND a.job_posting_id = $2
-                    ORDER BY ranking_score DESC, d.created_at DESC
+                    SELECT *
+                    FROM (
+                        SELECT DISTINCT ON (a.id)
+                               a.id AS application_id, a.candidate_id, a.status,
+                               d.id AS debate_result_id, d.final_score, d.created_at,
+                               {self._RANKING_SCORE_EXPR}
+                        FROM debate_results d
+                        JOIN job_applications a ON a.candidate_id = d.candidate_id
+                        WHERE d.organization_id = $1
+                          AND a.job_posting_id = $2
+                          AND d.job_posting_id = $2
+                        ORDER BY a.id, d.created_at DESC
+                    ) deduped
+                    ORDER BY ranking_score DESC, created_at DESC
                     """,
                     organization_id,
                     job_posting_id,
@@ -876,6 +1066,7 @@ class CandidateRepository:
                           SELECT 1 FROM debate_results d
                           WHERE d.organization_id = a.organization_id
                                 AND d.candidate_id = a.candidate_id
+                                AND d.job_posting_id = a.job_posting_id
                       )
                     """,
                     organization_id,
@@ -983,7 +1174,13 @@ class CandidateRepository:
                 """,
                 candidate_id,
             )
-        return [dict(row) for row in rows]
+        items = []
+        for row in rows:
+            item = dict(row)
+            if item.get("interview_proposed_at") is not None:
+                item["interview_proposed_at"] = _utc_iso(item["interview_proposed_at"])
+            items.append(item)
+        return items
 
     async def create_candidate_notification(
         self,
@@ -1046,13 +1243,13 @@ class CandidateRepository:
                 job_posting_id,
                 candidate_id,
                 organization_id,
-                datetime.fromisoformat(proposed_at.replace("Z", "+00:00"))
-                .astimezone(UTC)
-                .replace(tzinfo=None),
+                datetime.fromisoformat(proposed_at.replace("Z", "+00:00")).astimezone(UTC),
                 location_or_link,
                 notes,
             )
-        return dict(row)
+        out = dict(row)
+        out["proposed_at"] = _utc_iso(out.get("proposed_at"))
+        return out
 
     async def get_interview_schedule(
         self, job_posting_id: int, candidate_id: int
@@ -1069,7 +1266,11 @@ class CandidateRepository:
                 job_posting_id,
                 candidate_id,
             )
-        return None if row is None else dict(row)
+        if row is None:
+            return None
+        out = dict(row)
+        out["proposed_at"] = _utc_iso(out.get("proposed_at"))
+        return out
 
     async def respond_to_interview(
         self, interview_id: int, candidate_id: int, status: str
@@ -1088,7 +1289,11 @@ class CandidateRepository:
                 candidate_id,
                 status,
             )
-        return None if row is None else dict(row)
+        if row is None:
+            return None
+        out = dict(row)
+        out["proposed_at"] = _utc_iso(out.get("proposed_at"))
+        return out
 
     async def get_application_status(
         self, candidate_id: int, organization_id: int, job_posting_id: int
@@ -1135,17 +1340,17 @@ class CandidateRepository:
         param_index = 4
 
         if min_gpa is not None:
+            param_index += 1
             where_clauses.append(f"gpa >= ${param_index}")
             values.append(min_gpa)
-            param_index += 1
         if class_year is not None:
+            param_index += 1
             where_clauses.append(f"current_class = ${param_index}")
             values.append(class_year)
-            param_index += 1
         if min_experience_years is not None:
+            param_index += 1
             where_clauses.append(f"experience_years >= ${param_index}")
             values.append(min_experience_years)
-            param_index += 1
 
         sql = f"""
             SELECT id, full_name, university, gpa, current_class, experience_years,
@@ -1169,6 +1374,19 @@ class CandidateRepository:
                 rows = await connection.fetch(sql, *values)
         return [dict(row) for row in rows]
 
+    @staticmethod
+    def _build_or_tsquery(query_text: str) -> str:
+        """Builds an OR-joined Postgres tsquery string preserving Turkish alphanumeric terms."""
+        lowered = tr_lower(query_text)
+        tokens = re.findall(r"[0-9a-zçğıöşü]{2,}", lowered)
+        seen: dict[str, None] = {}
+        for tok in tokens:
+            if tok not in seen:
+                seen[tok] = None
+            if len(seen) >= 48:
+                break
+        return " | ".join(seen.keys())
+
     async def hybrid_search_candidates(
         self,
         *,
@@ -1182,122 +1400,93 @@ class CandidateRepository:
         limit: int = 2000,
     ) -> list[dict[str, Any]]:
         """
-        Hybrid search combining Supabase Full-Text Search (BM25) and pgvector Cosine Similarity.
-        Retrieves candidates for pre-LLM reranking.
+        Hybrid search combining PostgreSQL Full-Text Search (OR-tsquery) and pgvector
+        Cosine Similarity across both candidate-portal applications and org-uploaded CVs.
         """
         await self._ensure_connected()
-        where_clauses = ["organization_id = $3", "job_posting_id = $4"]
+        or_tsquery = self._build_or_tsquery(query_text)
+        cand_where = ["organization_id = $3", "job_posting_id = $4"]
+        app_where = ["a.organization_id = $3", "a.job_posting_id = $4"]
         values: list[Any] = [
             to_pgvector(query_embedding),
             limit,
             organization_id,
             job_posting_id,
-            query_text,
+            or_tsquery,
         ]
         param_index = 5
 
         if min_gpa is not None:
             param_index += 1
-            where_clauses.append(f"gpa >= ${param_index}")
+            cand_where.append(f"gpa >= ${param_index}")
+            app_where.append(f"p.gpa >= ${param_index}")
             values.append(min_gpa)
         if class_year is not None:
             param_index += 1
-            where_clauses.append(f"current_class = ${param_index}")
+            cand_where.append(f"current_class = ${param_index}")
+            app_where.append(f"p.current_class = ${param_index}")
             values.append(class_year)
         if min_experience_years is not None:
             param_index += 1
-            where_clauses.append(f"experience_years >= ${param_index}")
+            cand_where.append(f"experience_years >= ${param_index}")
+            app_where.append(f"p.experience_years >= ${param_index}")
             values.append(min_experience_years)
 
-        # 1. Primary Query: Search Candidate Self-Service Applications
-        app_where = [
-            "a.organization_id = $3",
-            "a.job_posting_id = $4",
-            "p.cv_embedding IS NOT NULL",
-        ]
-        app_param_index = 5
-        app_values = list(values)
-
-        if min_gpa is not None:
-            app_param_index += 1
-            app_where.append(f"p.gpa >= ${app_param_index}")
-            app_values.append(min_gpa)
-        if class_year is not None:
-            app_param_index += 1
-            app_where.append(f"p.current_class = ${app_param_index}")
-            app_values.append(class_year)
-        if min_experience_years is not None:
-            app_param_index += 1
-            app_where.append(f"p.experience_years >= ${app_param_index}")
-            app_values.append(min_experience_years)
-
+        vec_sim_expr_p = (
+            "CASE WHEN p.cv_embedding IS NOT NULL "
+            "THEN (1 - (p.cv_embedding <=> $1::vector)) ELSE 0.0 END"
+        )
         fts_rank_expr_p = (
-            "CASE WHEN p.fts IS NOT NULL THEN ts_rank_cd(p.fts, plainto_tsquery('english', $5)) "
-            "ELSE 0.0 END"
+            "CASE WHEN $5 <> '' AND p.fts IS NOT NULL "
+            "THEN ts_rank_cd(p.fts, to_tsquery('simple', $5)) ELSE 0.0 END"
         )
-        app_sql = f"""
-            SELECT p.candidate_id AS id, u.full_name, p.university, p.gpa, p.current_class,
-                   p.experience_years, p.skills, p.raw_cv_text, p.source_path,
-                   (1 - (p.cv_embedding <=> $1::vector)) AS vector_similarity,
-                   {fts_rank_expr_p} AS bm25_rank,
-                   (
-                       (1 - (p.cv_embedding <=> $1::vector)) * 0.7 + 
-                       ({fts_rank_expr_p}) * 0.3
-                   ) AS similarity
-            FROM job_applications a
-            JOIN candidate_profiles p ON p.candidate_id = a.candidate_id
-            JOIN candidate_users u ON u.id = a.candidate_id
-            WHERE {" AND ".join(app_where)}
-            ORDER BY similarity DESC
-            LIMIT $2
-        """
-
-        try:
-            async with self._pool.acquire() as connection:
-                async with connection.transaction():
-                    await connection.execute("SET LOCAL ivfflat.probes = 100")
-                    rows = await connection.fetch(app_sql, *app_values)
-                if rows:
-                    return [dict(row) for row in rows]
-        except Exception:
-            pass
-
-        # 2. Secondary Query: Fallback to Legacy candidates table
-        fts_rank_expr = (
-            "CASE WHEN fts IS NOT NULL THEN ts_rank_cd(fts, plainto_tsquery('english', $5)) "
-            "ELSE 0.0 END"
+        vec_sim_expr_c = (
+            "CASE WHEN cv_embedding IS NOT NULL "
+            "THEN (1 - (cv_embedding <=> $1::vector)) ELSE 0.0 END"
         )
-        sql = f"""
+        fts_rank_expr_c = (
+            "CASE WHEN $5 <> '' AND fts IS NOT NULL "
+            "THEN ts_rank_cd(fts, to_tsquery('simple', $5)) ELSE 0.0 END"
+        )
+
+        combined_sql = f"""
             SELECT id, full_name, university, gpa, current_class, experience_years,
-                   skills, raw_cv_text, source_path,
-                   (1 - (cv_embedding <=> $1::vector)) AS vector_similarity,
-                   {fts_rank_expr} AS bm25_rank,
-                   (
-                       (1 - (cv_embedding <=> $1::vector)) * 0.7 + 
-                       ({fts_rank_expr}) * 0.3
-                   ) AS similarity
-            FROM candidates
-            WHERE {" AND ".join(where_clauses)}
-            ORDER BY similarity DESC
+                   skills, raw_cv_text, source_path, vector_similarity, bm25_rank,
+                   similarity, candidate_source
+            FROM (
+                SELECT p.candidate_id AS id, u.full_name, p.university, p.gpa, p.current_class,
+                       p.experience_years, p.skills, p.raw_cv_text, p.source_path,
+                       ({vec_sim_expr_p}) AS vector_similarity,
+                       ({fts_rank_expr_p}) AS bm25_rank,
+                       (({vec_sim_expr_p}) * 0.7 + LEAST(({fts_rank_expr_p}), 1.0) * 0.3)
+                           AS similarity,
+                       'portal'::text AS candidate_source
+                FROM job_applications a
+                JOIN candidate_profiles p ON p.candidate_id = a.candidate_id
+                JOIN candidate_users u ON u.id = a.candidate_id
+                WHERE {" AND ".join(app_where)}
+
+                UNION ALL
+
+                SELECT id, full_name, university, gpa, current_class, experience_years,
+                       skills, raw_cv_text, source_path,
+                       ({vec_sim_expr_c}) AS vector_similarity,
+                       ({fts_rank_expr_c}) AS bm25_rank,
+                       (({vec_sim_expr_c}) * 0.7 + LEAST(({fts_rank_expr_c}), 1.0) * 0.3)
+                           AS similarity,
+                       'legacy'::text AS candidate_source
+                FROM candidates
+                WHERE {" AND ".join(cand_where)}
+            ) pool
+            ORDER BY vector_similarity DESC, bm25_rank DESC
             LIMIT $2
         """
 
-        try:
-            async with self._pool.acquire() as connection:
-                async with connection.transaction():
-                    await connection.execute("SET LOCAL ivfflat.probes = 100")
-                    rows = await connection.fetch(sql, *values)
-            return [dict(row) for row in rows]
-        except Exception:
-            return await self.search_candidates(
-                organization_id=organization_id,
-                job_posting_id=job_posting_id,
-                query_embedding=query_embedding,
-                min_gpa=min_gpa,
-                class_year=class_year,
-                min_experience_years=min_experience_years,
-                limit=limit,
-            )
+        async with self._pool.acquire() as connection:
+            async with connection.transaction():
+                await connection.execute("SET LOCAL ivfflat.probes = 100")
+                rows = await connection.fetch(combined_sql, *values)
+        return [dict(row) for row in rows]
 
     async def save_debate_result(
         self,
@@ -1307,6 +1496,10 @@ class CandidateRepository:
         pre_llm_score: float | None = None,
         relevance_score: float | None = None,
         competency_score: float | None = None,
+        dense_score: float | None = None,
+        sparse_score: float | None = None,
+        matched_skills: list[str] | None = None,
+        missing_skills: list[str] | None = None,
     ) -> int:
         await self._ensure_connected()
         async with self._pool.acquire() as connection:
@@ -1325,9 +1518,18 @@ class CandidateRepository:
                     job_posting_id,
                     pre_llm_score,
                     relevance_score,
-                    competency_score
+                    competency_score,
+                    dense_score,
+                    sparse_score,
+                    matched_skills,
+                    missing_skills,
+                    evidence_quotes,
+                    grounding_score
                 )
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+                VALUES (
+                    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
+                    $14, $15, $16::jsonb, $17::jsonb, $18::jsonb, $19
+                )
                 RETURNING id
                 """,
                 result.organization_id,
@@ -1343,6 +1545,12 @@ class CandidateRepository:
                 pre_llm_score,
                 relevance_score,
                 competency_score,
+                dense_score,
+                sparse_score,
+                json.dumps(matched_skills or []),
+                json.dumps(missing_skills or []),
+                json.dumps(result.evidence_quotes or []),
+                result.grounding_score,
             )
         return row["id"]
 
@@ -1408,37 +1616,53 @@ class CandidateRepository:
         async with self._pool.acquire() as connection:
             rows = await connection.fetch(
                 f"""
-                SELECT p.candidate_id, u.full_name, p.university,
-                       d.final_score, d.arbitrator_rationale, d.is_selected,
-                       d.pre_llm_score, d.relevance_score, d.competency_score,
-                       a.status AS application_status,
-                       {self._RANKING_SCORE_EXPR}
-                FROM debate_results d
-                JOIN job_applications a ON a.candidate_id = d.candidate_id
-                JOIN candidate_profiles p ON p.candidate_id = a.candidate_id
-                JOIN candidate_users u ON u.id = a.candidate_id
-                WHERE d.organization_id = $1 AND a.job_posting_id = $2
-                ORDER BY ranking_score DESC, d.created_at DESC
-                LIMIT $3
-                """,
-                organization_id,
-                job_posting_id,
-                limit,
-            )
-            if rows:
-                return [dict(row) for row in rows]
+                SELECT *
+                FROM (
+                    SELECT DISTINCT ON (candidate_source, candidate_id)
+                           candidate_id, full_name, university,
+                           final_score, arbitrator_rationale, is_selected,
+                           pre_llm_score, relevance_score, competency_score,
+                           dense_score, sparse_score, matched_skills, missing_skills,
+                           evidence_quotes, grounding_score,
+                           application_status, ranking_score, created_at
+                    FROM (
+                        SELECT 'portal'::text AS candidate_source,
+                               p.candidate_id, u.full_name, p.university,
+                               d.final_score, d.arbitrator_rationale, d.is_selected,
+                               d.pre_llm_score, d.relevance_score, d.competency_score,
+                               d.dense_score, d.sparse_score, d.matched_skills, d.missing_skills,
+                               d.evidence_quotes, d.grounding_score,
+                               a.status AS application_status,
+                               {self._RANKING_SCORE_EXPR},
+                               d.created_at
+                        FROM debate_results d
+                        JOIN job_applications a ON a.candidate_id = d.candidate_id
+                        JOIN candidate_profiles p ON p.candidate_id = a.candidate_id
+                        JOIN candidate_users u ON u.id = a.candidate_id
+                        WHERE d.organization_id = $1
+                          AND a.job_posting_id = $2
+                          AND d.job_posting_id = $2
 
-            rows = await connection.fetch(
-                f"""
-                SELECT c.id AS candidate_id, c.full_name, c.university,
-                       d.final_score, d.arbitrator_rationale, d.is_selected,
-                       d.pre_llm_score, d.relevance_score, d.competency_score,
-                       NULL::VARCHAR AS application_status,
-                       {self._RANKING_SCORE_EXPR}
-                FROM debate_results d
-                JOIN candidates c ON c.id = d.candidate_id
-                WHERE d.organization_id = $1 AND c.job_posting_id = $2
-                ORDER BY ranking_score DESC, d.created_at DESC
+                        UNION ALL
+
+                        SELECT 'legacy'::text AS candidate_source,
+                               c.id AS candidate_id, c.full_name, c.university,
+                               d.final_score, d.arbitrator_rationale, d.is_selected,
+                               d.pre_llm_score, d.relevance_score, d.competency_score,
+                               d.dense_score, d.sparse_score, d.matched_skills, d.missing_skills,
+                               d.evidence_quotes, d.grounding_score,
+                               NULL::VARCHAR AS application_status,
+                               {self._RANKING_SCORE_EXPR},
+                               d.created_at
+                        FROM debate_results d
+                        JOIN candidates c ON c.id = d.candidate_id
+                        WHERE d.organization_id = $1
+                          AND c.job_posting_id = $2
+                          AND (d.job_posting_id = $2 OR d.job_posting_id IS NULL)
+                    ) all_rows
+                    ORDER BY candidate_source, candidate_id, created_at DESC
+                ) deduped
+                ORDER BY ranking_score DESC, created_at DESC
                 LIMIT $3
                 """,
                 organization_id,
@@ -1614,7 +1838,11 @@ class CandidateRepository:
                        j.title, j.description, j.deadline_at, j.created_at
                 FROM job_postings j
                 JOIN organizations o ON o.id = j.organization_id
-                WHERE j.is_active = TRUE AND o.is_active = TRUE
+                WHERE j.is_active = TRUE
+                  AND o.is_active = TRUE
+                  AND o.license_status IN ('active', 'trial')
+                  AND (o.license_expires_at IS NULL OR o.license_expires_at >= CURRENT_TIMESTAMP)
+                  AND (j.deadline_at IS NULL OR j.deadline_at >= CURRENT_TIMESTAMP)
                 ORDER BY j.created_at DESC
                 """
             )
@@ -1629,7 +1857,12 @@ class CandidateRepository:
                        j.title, j.description, j.deadline_at, j.created_at
                 FROM job_postings j
                 JOIN organizations o ON o.id = j.organization_id
-                WHERE j.id = $1 AND j.is_active = TRUE AND o.is_active = TRUE
+                WHERE j.id = $1
+                  AND j.is_active = TRUE
+                  AND o.is_active = TRUE
+                  AND o.license_status IN ('active', 'trial')
+                  AND (o.license_expires_at IS NULL OR o.license_expires_at >= CURRENT_TIMESTAMP)
+                  AND (j.deadline_at IS NULL OR j.deadline_at >= CURRENT_TIMESTAMP)
                 """,
                 posting_id,
             )
@@ -1658,7 +1891,7 @@ class CandidateRepository:
             result = await connection.execute(
                 """
                 DELETE FROM job_applications
-                WHERE job_posting_id = $1 AND candidate_id = $2
+                WHERE job_posting_id = $1 AND candidate_id = $2 AND status = 'applied'
                 """,
                 job_posting_id,
                 candidate_id,
@@ -1687,6 +1920,46 @@ class CandidateRepository:
                 candidate_id,
             )
             return "DELETE 1" in result
+
+    async def update_job_posting(
+        self,
+        *,
+        job_posting_id: int,
+        organization_id: int,
+        title: str,
+        description: str,
+        deadline_at: str | None = None,
+    ) -> dict[str, Any] | None:
+        await self._ensure_connected()
+        async with self._pool.acquire() as connection:
+            existing_desc = await connection.fetchval(
+                "SELECT description FROM job_postings WHERE id = $1 AND organization_id = $2",
+                job_posting_id,
+                organization_id,
+            )
+            if existing_desc is None:
+                return None
+            description_changed = existing_desc.strip() != description.strip()
+            await connection.execute(
+                """
+                UPDATE job_postings
+                SET title = $3,
+                    description = $4,
+                    deadline_at = NULLIF($5, '')::timestamp,
+                    description_embedding = CASE
+                        WHEN $6 THEN NULL
+                        ELSE description_embedding
+                    END
+                WHERE id = $1 AND organization_id = $2
+                """,
+                job_posting_id,
+                organization_id,
+                title,
+                description,
+                deadline_at,
+                description_changed,
+            )
+        return await self.get_job_posting(job_posting_id, organization_id)
 
     async def delete_job_posting(self, job_posting_id: int, organization_id: int) -> bool:
         await self._ensure_connected()

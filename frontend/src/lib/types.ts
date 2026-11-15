@@ -60,6 +60,19 @@ export interface UploadResult {
   errors: { filename: string; detail: string }[];
 }
 
+export interface CompetencyBreakdown {
+  competency_score: number;
+  exp_score: number;
+  gpa_score: number;
+  class_score: number;
+  keyword_score: number;
+}
+
+export interface SkillMatches {
+  matched_skills: string[];
+  missing_skills: string[];
+}
+
 export interface Candidate {
   id: number;
   full_name: string;
@@ -71,20 +84,26 @@ export interface Candidate {
   source_path: string | null;
   created_at?: string;
   raw_cv_text?: string;
-  // Persisted the moment the candidate applies (posting embedding is cached, so this
-  // is free after the first applicant) or after an org runs "sırala"/"kısa liste" --
-  // present here so the "Adaylar" tab survives a page refresh.
   pre_llm_score?: number | null;
   relevance_score?: number | null;
   competency_score?: number | null;
+  dense_score?: number | null;
+  sparse_score?: number | null;
+  matched_skills?: string[];
+  missing_skills?: string[];
 }
 
 export interface RankedCandidate extends Candidate {
-  raw_cv_text: string;
+  raw_cv_text?: string;
   similarity: number;
   pre_llm_score?: number;
   relevance_score?: number;
   competency_score?: number;
+  dense_score?: number;
+  sparse_score?: number;
+  matched_skills?: string[];
+  missing_skills?: string[];
+  competency_breakdown?: CompetencyBreakdown;
 }
 
 export interface DebateResult {
@@ -101,6 +120,13 @@ export interface DebateResult {
   pre_llm_score?: number | null;
   relevance_score?: number | null;
   competency_score?: number | null;
+  dense_score?: number | null;
+  sparse_score?: number | null;
+  matched_skills?: string[];
+  missing_skills?: string[];
+  evidence_quotes?: string[];
+  grounding_score?: number | null;
+  competency_breakdown?: CompetencyBreakdown;
 }
 
 export interface CandidateUser {
@@ -160,6 +186,12 @@ export interface TopResult {
   pre_llm_score?: number | null;
   relevance_score?: number | null;
   competency_score?: number | null;
+  dense_score?: number | null;
+  sparse_score?: number | null;
+  matched_skills?: string[];
+  missing_skills?: string[];
+  evidence_quotes?: string[];
+  grounding_score?: number | null;
   application_status?: "applied" | "selected" | "rejected" | null;
 }
 
@@ -225,4 +257,42 @@ export interface ShortlistResponse {
   already_evaluated_count: number;
   queued: ShortlistCandidateRef[];
   already_evaluated: ShortlistCandidateRef[];
+}
+
+export interface ShortlistFailedCandidate {
+  id: number;
+  full_name: string;
+  error: string;
+}
+
+export interface ShortlistStatusResponse {
+  status: "idle" | "running" | "completed" | "completed_with_errors" | "failed";
+  total: number;
+  completed: number;
+  succeeded: number;
+  failed: number;
+  failed_candidates: ShortlistFailedCandidate[];
+  evaluated_count: number;
+  started_at: string | null;
+  finished_at: string | null;
+  message: string | null;
+}
+
+export interface SystemStatus {
+  database_reachable: boolean;
+  embedding_provider: string;
+  embedding_model: string;
+  embedding_dimensions: number;
+  hybrid_dense_weight: number;
+  hybrid_sparse_weight: number;
+  mistral_key_count: number;
+  phoenix_enabled: boolean;
+  phoenix_project_name: string;
+  cookie_secure: boolean;
+}
+
+export interface OrganizationPasswordReset {
+  organization_id: number;
+  username: string;
+  password: string;
 }

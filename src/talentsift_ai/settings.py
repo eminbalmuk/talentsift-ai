@@ -9,6 +9,18 @@ class Settings(BaseSettings):
     direct_database_url: str | None = Field(default=None)
     mistral_api_keys: list[str] = Field(default_factory=list)
     mistral_base_url: str = Field(default="https://api.mistral.ai/v1")
+    embedding_provider: str = Field(default="ultrabert")
+    embedding_model_name: str = Field(default="dmis-lab/UltraBERT-Embed-150M")
+    embedding_dimensions: int = Field(default=768)
+    embedding_device: str | None = Field(default=None)
+    embedding_local_files_only: bool = Field(default=False)
+    embedding_query_instruction: str = Field(
+        default="Instruct: Given a job description, retrieve matching candidate resumes\nQuery: "
+    )
+    hybrid_dense_weight: float = Field(default=0.60, ge=0.0, le=1.0)
+    hybrid_sparse_weight: float = Field(default=0.40, ge=0.0, le=1.0)
+    hybrid_fusion_method: str = Field(default="hybrid_blend")
+    warmup_embeddings_on_startup: bool = Field(default=True)
     product_key_pepper: str = Field(default="")
     admin_session_secret: str = Field(default="")
     admin_username: str = Field(default="admin")

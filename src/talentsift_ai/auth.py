@@ -49,18 +49,34 @@ def generate_license_key() -> str:
 
 def hash_secret(secret: str, pepper: str = "") -> str:
     normalized_secret = secret.strip()
-    salt = pepper.encode("utf-8") if pepper else b"talentsift_ai_salt"
-    key = hashlib.pbkdf2_hmac("sha256", normalized_secret.encode("utf-8"), salt, 100_000)
-    return key.hex()
+    user_salt = secrets.token_hex(16)
+    salt_material = f"{user_salt}:{pepper}".encode()
+    key = hashlib.pbkdf2_hmac("sha256", normalized_secret.encode(), salt_material, 100_000)
+    return f"pbkdf2$sha256${user_salt}${key.hex()}"
 
 
 def verify_secret(secret: str, expected_hash: str, pepper: str = "") -> bool:
-    actual_pbkdf2 = hash_secret(secret, pepper=pepper)
-    if hmac.compare_digest(actual_pbkdf2, expected_hash):
+    normalized_secret = secret.strip()
+    if expected_hash.startswith("pbkdf2$sha256$"):
+        parts = expected_hash.split("$")
+        if len(parts) != 4:
+            return False
+        _, _, user_salt, expected_digest = parts
+        salt_material = f"{user_salt}:{pepper}".encode()
+        actual_key = hashlib.pbkdf2_hmac(
+            "sha256", normalized_secret.encode(), salt_material, 100_000
+        )
+        return hmac.compare_digest(actual_key.hex(), expected_digest)
+
+    # Legacy static-salt PBKDF2-SHA256 fallback check for existing hashes
+    legacy_pbkdf2_salt = pepper.encode("utf-8") if pepper else b"talentsift_ai_salt"
+    legacy_pbkdf2 = hashlib.pbkdf2_hmac(
+        "sha256", normalized_secret.encode("utf-8"), legacy_pbkdf2_salt, 100_000
+    ).hex()
+    if hmac.compare_digest(legacy_pbkdf2, expected_hash):
         return True
 
     # Legacy HMAC-SHA256 fallback check for existing hashes
-    normalized_secret = secret.strip()
     if pepper:
         legacy_hash = hmac.new(
             pepper.encode("utf-8"),
