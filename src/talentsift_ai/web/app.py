@@ -8,7 +8,11 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, Response
 
 from talentsift_ai.observability import configure_phoenix
-from talentsift_ai.pipeline.embeddings import UltraBERTEmbedder, get_embedder
+from talentsift_ai.pipeline.embeddings import (
+    UltraBERTEmbedder,
+    close_cached_embedders,
+    get_embedder,
+)
 from talentsift_ai.settings import get_settings
 from talentsift_ai.web import db
 from talentsift_ai.web.admin import router as admin_router
@@ -41,6 +45,7 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
             )
 
     yield
+    await close_cached_embedders()
     await close_shared_mistral_client()
     await db.close_pool()
 

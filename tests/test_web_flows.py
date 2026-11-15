@@ -15,9 +15,9 @@ def _configure_settings(monkeypatch) -> None:
         admin_session_secret="test-session-secret",
         product_key_pepper="test-pepper",
         cookie_secure=False,
-        embedding_provider="ultrabert",
-        ultrabert_model_name="dmis-lab/UltraBERT-Embed-150M",
-        embedding_dimensions=768,
+        embedding_provider="nvidia",
+        embedding_model_name="nvidia/nemotron-3.5-embed-1b",
+        embedding_dimensions=1024,
         hybrid_dense_weight=0.65,
         hybrid_sparse_weight=0.35,
         hybrid_fusion_method="hybrid_blend",
@@ -145,12 +145,12 @@ def test_candidate_upload_validation_rescore_and_finalized_withdraw_block(monkey
                     experience_years=4,
                     skills=["Python", "FastAPI", "PostgreSQL"],
                 ),
-                embedding=[0.1] * 768,
+                embedding=[0.1] * 1024,
             )
 
     class FakeEmbedder:
         async def embed_query(self, text: str):
-            return [0.1] * 768
+            return [0.1] * 1024
 
     class FakeRepo:
         def __init__(self, pool=None):
@@ -183,7 +183,7 @@ def test_candidate_upload_validation_rescore_and_finalized_withdraw_block(monkey
             ]
 
         async def get_posting_embedding(self, posting_id: int):
-            return [0.1] * 768
+            return [0.1] * 1024
 
         async def get_candidate_similarity(self, **kwargs):
             return 0.88
@@ -428,7 +428,7 @@ def test_security_headers_csrf_rate_limit_magic_bytes_and_admin_actions(monkeypa
             assert sys_resp.status_code == 200
             sys_json = sys_resp.json()
             assert sys_json["database_reachable"] is True
-            assert sys_json["embedding_model"] == "dmis-lab/UltraBERT-Embed-150M"
+            assert sys_json["embedding_model"] == "nvidia/nemotron-3.5-embed-1b"
 
             pw_reset = client.post("/api/admin/organizations/10/password/reset")
             assert pw_reset.status_code == 200

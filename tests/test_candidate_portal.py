@@ -43,9 +43,9 @@ def test_ingestion_result_structure():
     result = IngestionResult(
         raw_cv_text="John Doe METU CV...",
         structured_data=cv_data,
-        embedding=[0.1] * 768,
+        embedding=[0.1] * 1024,
     )
 
     assert result.structured_data.university == "METU"
-    assert len(result.embedding) == 768
+    assert len(result.embedding) == 1024
     assert result.raw_cv_text.startswith("John Doe")

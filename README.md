@@ -2,7 +2,7 @@
 
 TalentSift AI; adaylar, kurumlar (İK ekipleri) ve platform yöneticileri için tasarlanmış, **hibrit arama + çok ajanlı yapay zeka jürisi** tabanlı uçtan uca bir işe alım ve özgeçmiş eleme platformudur.
 
-Sistem; yerel **`dmis-lab/UltraBERT-Embed-150M`** (`768`-boyutlu anlamsal vektörler) + **`Okapi BM25` / 1-2 gram `TF-IDF`** hibrit füzyonu ile adayları sıralar, ardından **LangGraph** üzerinde kör (blind) ve paralel çalışan **Optimist**, **Pessimist** ve **Arbitrator (Hakem)** ajanlarıyla CV içindeki doğrulanabilir kanıtlara dayalı nihai değerlendirme üretir.
+Sistem; bulut tabanlı **NVIDIA NIM `nvidia/nemotron-3.5-embed-1b`** (`1024`-boyutlu Matryoshka vektörler, isteğe bağlı yerel `dmis-lab/UltraBERT-Embed-150M`) + **`Okapi BM25` / 1-2 gram `TF-IDF`** hibrit füzyonu ile adayları sıralar, ardından **LangGraph** üzerinde kör (blind) ve paralel çalışan **Optimist**, **Pessimist** ve **Arbitrator (Hakem)** ajanlarıyla CV içindeki doğrulanabilir kanıtlara dayalı nihai değerlendirme üretir.
 
 ---
 
@@ -17,10 +17,10 @@ Next.js 16 (App Router, Tailwind CSS v4, shadcn/ui)
            │  (/api/* Next.js rewrite proxy — CORS gerektirmez)
            ▼
 FastAPI Backend (CSRF + Rate Limit + Rol Bazlı HMAC-SHA256 HttpOnly Cookie)
-  ├─ Ingest Pipeline       -> .pdf / .docx / .txt / .md ayrıştırma + Mistral yapılandırılmış çıkarım + UltraBERT embedding
-  ├─ Hybrid Search         -> PostgreSQL SQL filtre + pgvector (768-dim) + Okapi BM25 & TF-IDF (60/40 blend) + Yetkinlik skoru
+  ├─ Ingest Pipeline       -> .pdf / .docx / .txt / .md ayrıştırma + Mistral yapılandırılmış çıkarım + Nemotron 3.5 1B embedding
+  ├─ Hybrid Search         -> PostgreSQL SQL filtre + pgvector (1024-dim) + Okapi BM25 & TF-IDF (60/40 blend) + Yetkinlik skoru
   ├─ Multi-Agent AI Jury   -> PII maskeleme -> Paralel (Optimist || Pessimist) -> Arbitrator + Kanıt/Grounding doğrulaması
-  └─ PostgreSQL + pgvector -> Multi-tenant kurum izolasyonu, aday profilleri, başvurular, mülakatlar ve kullanım kayıtları
+  └─ Supabase Postgres     -> pgvector vektörleri + multi-tenant kurum izolasyonu, adaylar, başvurular ve kullanım kayıtları
 ```
 
 ---
@@ -28,7 +28,7 @@ FastAPI Backend (CSRF + Rate Limit + Rol Bazlı HMAC-SHA256 HttpOnly Cookie)
 ## Temel Özellikler
 
 ### 1. Yapay Zeka ve Arama Mimarisi
-- **Yerel UltraBERT Embedding (`dmis-lab/UltraBERT-Embed-150M`):** `sentence-transformers` üzerinden yerel olarak çalışan `768`-boyutlu yoğun vektör üretimi ve `pgvector` HNSW/kosinüs araması. (İstenirse `EMBEDDING_PROVIDER=mistral` ile Mistral embedding'e geçilebilir.)
+- **NVIDIA NIM Bulut Embedding (`nvidia/nemotron-3.5-embed-1b`, `1024d`):** Hafif HTTP istemcisi üzerinden (`input_type="passage"` / `"query"`) çalışan asimetrik embedding üretimi. `dimensions=1024` Matryoshka çıktısı sayesinde Supabase `pgvector` indeksleriyle tam uyumludur ve sunucuda PyTorch/GPU belleği tüketmez. (Yerel çalıştırma için `EMBEDDING_PROVIDER=ultrabert`, fallback için `mistral` seçilebilir.)
 - **Sparse + Dense Hibrit Füzyon:** Türkçe ve İngilizce teknik terimleri koruyan özel tokenizer ile **Okapi BM25 + alt-karakter/1-2 gram TF-IDF** seyrek puanlaması, yoğun vektör benzerliği ile ağırlıklı olarak (`HYBRID_DENSE_WEIGHT=0.60`, `HYBRID_SPARSE_WEIGHT=0.40`) birleştirilir.
 - **Kişilik / Önyargı Arındırılmış Paralel AI Jürisi:**
   - Değerlendirme öncesinde aday CV'sindeki kişisel/demografik bilgiler maskelenir.
@@ -62,9 +62,10 @@ FastAPI Backend (CSRF + Rate Limit + Rol Bazlı HMAC-SHA256 HttpOnly Cookie)
 - **Python 3.11+**
 - **Node.js 20+ ve npm**
 - **Docker Desktop** (yerel PostgreSQL 16 + `pgvector` için)
+- **NVIDIA NIM API Key** (`NVIDIA_API_KEY` — varsayılan `nvidia/nemotron-3.5-embed-1b` 1024d embedding için)
 - **Mistral API Key** (`MISTRAL_API_KEYS` — OCR, yapılandırılmış extraction ve AI Jüri LLM çağrıları için)
 
-> **Not:** Varsayılan embedding sağlayıcısı `ultrabert` (`dmis-lab/UltraBERT-Embed-150M`) yerel Hugging Face cache/indirmesi üzerinden PyTorch/SentenceTransformers ile çalışır.
+> **Not:** Yerel UltraBERT embedding modunu (`EMBEDDING_PROVIDER=ultrabert`) kullanmak isterseniz `pip install -e ".[local-embed]"` ile opsiyonel PyTorch/SentenceTransformers paketlerini kurabilirsiniz. Varsayılan bulut kurulumunda (`nvidia`) ağır model kütüphaneleri gerekmez.
 
 ---
 
@@ -81,7 +82,7 @@ pip install -e ".[dev,observability,eval]"
 copy .env.example .env
 ```
 
-`.env` dosyasını açıp özellikle `MISTRAL_API_KEYS`, `PRODUCT_KEY_PEPPER` ve `ADMIN_SESSION_SECRET` değerlerini güncelleyin (tüm ortam değişkenleri için [.env.example](.env.example) dosyasına bakın).
+`.env` dosyasını açıp özellikle `NVIDIA_API_KEY`, `MISTRAL_API_KEYS`, `PRODUCT_KEY_PEPPER` ve `ADMIN_SESSION_SECRET` değerlerini güncelleyin (tüm ortam değişkenleri için [.env.example](.env.example) dosyasına bakın).
 
 ### 2. PostgreSQL ve migration'ları başlatın
 
@@ -90,7 +91,7 @@ docker compose up -d
 talentsift db init
 ```
 
-`db init`, `migrations/` altındaki `001_initial.sql` – `012_platform_fixes.sql` migration dosyalarını idempotent biçimde sırayla çalıştırır.
+`db init`, `migrations/` altındaki `001_initial.sql` – `013_nim_1024_embeddings.sql` migration dosyalarını idempotent biçimde sırayla çalıştırır.
 
 ### 3. Yönetici (Admin) kullanıcısını oluşturun
 
@@ -136,7 +137,7 @@ Kurulum sonrası `talentsift` CLI üzerinden aşağıdaki işlemleri de doğruda
 # Veritabanı migration'larını uygula
 talentsift db init
 
-# Eksik (veya --all ile tüm) CV/profil/ilan vektörlerini UltraBERT ile yeniden hesapla
+# Eksik (veya --all ile tüm) CV/profil/ilan vektörlerini yapılandırılmış embedder ile yeniden hesapla
 talentsift db reembed
 talentsift db reembed --all
 
@@ -165,9 +166,9 @@ talentsift-ai/
 │   ├── agents/          # LangGraph Optimist/Pessimist/Arbitrator jüri akışı ve prompt'lar
 │   ├── db/              # asyncpg havuzu ve SQL + pgvector repository katmanı
 │   ├── observability/   # Arize Phoenix + OpenInference izleme entegrasyonu
-│   ├── pipeline/        # UltraBERT embeddings, BM25/TF-IDF sparse, extraction, ingest, reranker, hybrid search
+│   ├── pipeline/        # NVIDIA NIM / UltraBERT embeddings, BM25/TF-IDF sparse, extraction, ingest, reranker, hybrid search
 │   └── web/             # FastAPI uygulaması, CSRF/rate-limit/security, admin/org/candidate router'ları
-├── migrations/          # PostgreSQL + pgvector şema dosyaları (001–012)
+├── migrations/          # PostgreSQL + pgvector şema dosyaları (001–013)
 ├── tests/               # Pytest birim ve FastAPI akış/güvenlik testleri
 ├── frontend/            # Next.js 16, TypeScript, Tailwind CSS v4, shadcn/ui web arayüzü
 ├── Dockerfile           # Python 3.11 container tanımı
@@ -206,7 +207,7 @@ Yerel geliştirmede `docker compose` ile `pgvector/pgvector:pg16`, production'da
 4. URL sonlarına `?pgbouncer=true` eklemeyin; `asyncpg` bunu tanımaz (`statement_cache_size=0` kod içinde ayarlıdır).
 
 ### Backend (Render) ve Frontend (Vercel)
-- **Render:** Kök dizindeki [render.yaml](render.yaml) ve [Dockerfile](Dockerfile) üzerinden servis oluşturun (`DATABASE_URL`, `DIRECT_DATABASE_URL`, `MISTRAL_API_KEYS`, `PRODUCT_KEY_PEPPER`, `ADMIN_SESSION_SECRET`, `COOKIE_SECURE=true`). Container açılışında `talentsift db init` ve `talentsift admin provision --skip-if-exists` otomatik çalışır. (Yerel/küçük Free tier ortamlarda `EMBEDDING_PROVIDER=ultrabert` yerine RAM kısıtına göre `mistral` tercih edilebilir.)
+- **Render:** Kök dizindeki [render.yaml](render.yaml) ve [Dockerfile](Dockerfile) üzerinden servis oluşturun (`DATABASE_URL`, `DIRECT_DATABASE_URL`, `NVIDIA_API_KEY`, `MISTRAL_API_KEYS`, `PRODUCT_KEY_PEPPER`, `ADMIN_SESSION_SECRET`, `COOKIE_SECURE=true`, `EMBEDDING_PROVIDER=nvidia`, `EMBEDDING_MODEL_NAME=nvidia/nemotron-3.5-embed-1b`, `EMBEDDING_DIMENSIONS=1024`). PostgreSQL Render container'ının içinde lokal olarak tutulmaz; Render servisi uzaktaki **Supabase PostgreSQL + pgvector** veritabanına bağlanır. Container açılışında `talentsift db init` ve `talentsift admin provision --skip-if-exists` otomatik çalışır.
 - **Vercel:** `Root Directory` değerini `frontend` olarak ayarlayın ve `BACKEND_URL` ortam değişkenini backend URL'sine yönlendirin.
 
 ---

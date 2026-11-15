@@ -1,7 +1,9 @@
 from talentsift_ai.pipeline.embeddings import (
     EmbeddingProvider,
     MistralEmbedder,
+    NvidiaNimEmbedder,
     UltraBERTEmbedder,
+    close_cached_embedders,
     get_embedder,
 )
 from talentsift_ai.pipeline.ingest import ResumeIngestionPipeline
@@ -23,12 +25,14 @@ __all__ = [
     "EmbeddingProvider",
     "HybridSearchService",
     "MistralEmbedder",
+    "NvidiaNimEmbedder",
     "PreLLMReranker",
     "ResumeIngestionPipeline",
     "SparseScorer",
     "UltraBERTEmbedder",
     "calculate_competency_breakdown",
     "calculate_competency_score",
+    "close_cached_embedders",
     "extract_skill_matches",
     "fuse_dense_and_sparse",
     "get_embedder",

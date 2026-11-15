@@ -275,12 +275,12 @@ async def get_system_status(
             db_ok = await repository.ping()
     except (OSError, TimeoutError, asyncpg.PostgresError):
         db_ok = False
+    provider = settings.embedding_provider.lower().strip()
+    embedding_model = "mistral-embed" if provider == "mistral" else settings.embedding_model_name
     return {
         "database_reachable": db_ok,
         "embedding_provider": settings.embedding_provider,
-        "embedding_model": settings.ultrabert_model_name
-        if settings.embedding_provider.lower() == "ultrabert"
-        else "mistral-embed",
+        "embedding_model": embedding_model,
         "embedding_dimensions": settings.embedding_dimensions,
         "hybrid_dense_weight": settings.hybrid_dense_weight,
         "hybrid_sparse_weight": settings.hybrid_sparse_weight,

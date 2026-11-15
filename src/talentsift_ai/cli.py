@@ -74,7 +74,7 @@ def reembed_db(
         ),
     ] = False,
 ) -> None:
-    """Re-compute CV and job-posting embeddings with the configured embedder (UltraBERT)."""
+    """Re-compute CV and job-posting embeddings with the configured embedder (NIM / UltraBERT)."""
 
     async def _reembed() -> None:
         settings = get_settings()
