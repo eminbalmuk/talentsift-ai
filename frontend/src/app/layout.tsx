@@ -15,9 +15,9 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "TalentSift AI",
+  title: "TalentSift AI — Kurumsal Akıllı İşe Alım Platformu",
   description:
-    "UltraBERT hibrit arama ve Mistral AI destekli çok ajanlı yapay zeka işe alım platformu.",
+    "Kurumlar ve adaylar için kanıta dayalı, şeffaf ve hızlı yapay zeka destekli işe alım ve mülakat platformu.",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

@@ -986,13 +986,13 @@ export default function PostingDetailPage() {
                             </span>
                           </div>
                           <div className="flex justify-between rounded bg-muted/30 px-2 py-1">
-                            <span className="text-muted-foreground">Anlamsal / UltraBERT</span>
+                            <span className="text-muted-foreground">Anlamsal Uyum</span>
                             <span className="font-medium tabular-nums">
                               {formatScore(ranked.dense_score)}
                             </span>
                           </div>
                           <div className="flex justify-between rounded bg-muted/30 px-2 py-1">
-                            <span className="text-muted-foreground">Anahtar Kelime / BM25</span>
+                            <span className="text-muted-foreground">Anahtar Kelime Uyumu</span>
                             <span className="font-medium tabular-nums">
                               {formatScore(ranked.sparse_score)}
                             </span>
@@ -1031,8 +1031,8 @@ export default function PostingDetailPage() {
                     <>
                       <TableHead scope="col">Pre-LLM Puanı</TableHead>
                       <TableHead scope="col">İlan Uyumu</TableHead>
-                      <TableHead scope="col">Anlamsal / UltraBERT</TableHead>
-                      <TableHead scope="col">Anahtar Kelime / BM25</TableHead>
+                      <TableHead scope="col">Anlamsal Uyum</TableHead>
+                      <TableHead scope="col">Anahtar Kelime Uyumu</TableHead>
                       <TableHead scope="col">Donanım</TableHead>
                       <TableHead scope="col">Yetenek Eşleşmesi</TableHead>
                     </>
@@ -1178,10 +1178,10 @@ export default function PostingDetailPage() {
             </div>
             <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
               Girdiğiniz sayı (N) <strong className="font-medium text-foreground">nihai mülakat hedefidir</strong>.
-              &quot;Kısa liste oluştur&quot; ön eleme (Anlamsal UltraBERT + Anahtar Kelime BM25 +
-              Donanım) sıralamasından en iyi ~3N adayı İyimser / Kötümser / Hakem yapay zeka jürisine
-              gönderir. Analizler bittikten sonra &quot;Sonuçlandır&quot; ile en iyi N adayı mülakata
-              seçebilir, diğer adaylara açıklayıcı sonuç bildirimi gönderebilirsiniz.
+              &quot;Kısa liste oluştur&quot; ön eleme (Anlamsal Uyum + Anahtar Kelime + Donanım)
+              sıralamasından en iyi ~3N adayı derinlemesine yapay zeka değerlendirmesine gönderir.
+              Analizler bittikten sonra &quot;Sonuçlandır&quot; ile en iyi N adayı mülakata seçebilir,
+              diğer adaylara açıklayıcı sonuç bildirimi gönderebilirsiniz.
             </p>
           </Card>
 
@@ -1313,13 +1313,13 @@ export default function PostingDetailPage() {
 
                   <div className="grid grid-cols-2 gap-1.5 text-[11px]">
                     <div className="flex justify-between rounded bg-muted/25 px-2 py-1">
-                      <span className="text-muted-foreground">Anlamsal / UltraBERT</span>
+                      <span className="text-muted-foreground">Anlamsal Uyum</span>
                       <span className="font-medium tabular-nums">
                         {formatScore(result.dense_score)}
                       </span>
                     </div>
                     <div className="flex justify-between rounded bg-muted/25 px-2 py-1">
-                      <span className="text-muted-foreground">Anahtar Kelime / BM25</span>
+                      <span className="text-muted-foreground">Anahtar Kelime Uyumu</span>
                       <span className="font-medium tabular-nums">
                         {formatScore(result.sparse_score)}
                       </span>
@@ -1359,8 +1359,8 @@ export default function PostingDetailPage() {
                   <TableHead scope="col">Nihai Puan</TableHead>
                   <TableHead scope="col">Yapay Zeka Jüri</TableHead>
                   <TableHead scope="col">Pre-LLM</TableHead>
-                  <TableHead scope="col">Anlamsal / UltraBERT</TableHead>
-                  <TableHead scope="col">Anahtar Kelime / BM25</TableHead>
+                  <TableHead scope="col">Anlamsal Uyum</TableHead>
+                  <TableHead scope="col">Anahtar Kelime Uyumu</TableHead>
                   <TableHead scope="col">Donanım</TableHead>
                   <TableHead scope="col">Kanıt</TableHead>
                   <TableHead scope="col">Yetenekler</TableHead>

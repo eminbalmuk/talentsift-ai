@@ -523,7 +523,7 @@ export default function CandidateDetailPage() {
                 <div className="flex flex-col items-center gap-1 rounded-lg bg-muted/50 px-3 py-3 text-center">
                   <Sparkles className="h-4 w-4 text-muted-foreground" />
                   <span className="text-[11px] font-medium text-muted-foreground">
-                    Anlamsal / UltraBERT
+                    Anlamsal Uyum
                   </span>
                   <span className="text-lg font-semibold tabular-nums">
                     {formatScore(denseScore)}
@@ -533,7 +533,7 @@ export default function CandidateDetailPage() {
                 <div className="flex flex-col items-center gap-1 rounded-lg bg-muted/50 px-3 py-3 text-center">
                   <Search className="h-4 w-4 text-muted-foreground" />
                   <span className="text-[11px] font-medium text-muted-foreground">
-                    Anahtar Kelime / BM25
+                    Anahtar Kelime Uyumu
                   </span>
                   <span className="text-lg font-semibold tabular-nums">
                     {formatScore(sparseScore)}
@@ -553,7 +553,7 @@ export default function CandidateDetailPage() {
 
               {preLlmScore == null ? (
                 <p className="rounded-lg border border-border/50 bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
-                  Anlamsal / BM25 ilan uyumu skorları henüz hesaplanmamış. İlan sayfasından &quot;İş
+                  Anlamsal ve anahtar kelime ilan uyumu skorları henüz hesaplanmamış. İlan sayfasından &quot;İş
                   tanımına göre sırala&quot; veya aşağıdan jüri değerlendirmesini çalıştırdığınızda bu
                   skorlar otomatik doldurulur.
                 </p>
@@ -656,8 +656,8 @@ export default function CandidateDetailPage() {
               </CardHeader>
               <CardContent className="flex flex-col gap-3">
                 <p className="text-sm text-muted-foreground">
-                  İlanın iş tanımı kullanılarak İyimser / Kötümser / Hakem çoklu ajan jüri
-                  değerlendirmesini başlatın.
+                  İlanın iş tanımını kullanarak adayın güçlü yönlerini, risk alanlarını ve kanıta
+                  dayalı nihai değerlendirmesini oluşturun.
                 </p>
                 <div className="flex flex-wrap items-center gap-2">
                   <Label htmlFor="initialDebateLanguage" className="sr-only">
@@ -678,8 +678,8 @@ export default function CandidateDetailPage() {
                   </Select>
                   <Button type="button" onClick={handleRunDebate} disabled={running}>
                     {running
-                      ? "İyimser, kötümser ve hakem ajanlar çalışıyor..."
-                      : "Jüri Değerlendirmesini Başlat"}
+                      ? "Aday derinlemesine analiz ediliyor..."
+                      : "Detaylı Değerlendirmeyi Başlat"}
                   </Button>
                 </div>
               </CardContent>
@@ -724,7 +724,7 @@ export default function CandidateDetailPage() {
                 <Card className="border-border/60">
                   <CardContent className="flex flex-col items-center gap-1 py-4">
                     <ThumbsUp className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
-                    <span className="text-xs text-muted-foreground">İyimser Jüri</span>
+                    <span className="text-xs text-muted-foreground">Güçlü Yönler Puanı</span>
                     <span className="text-2xl font-semibold tabular-nums">
                       {debate.optimist_score}
                     </span>
@@ -734,7 +734,7 @@ export default function CandidateDetailPage() {
                 <Card className="border-border/60">
                   <CardContent className="flex flex-col items-center gap-1 py-4">
                     <ThumbsDown className="h-4 w-4 text-red-600 dark:text-red-400" />
-                    <span className="text-xs text-muted-foreground">Kötümser Jüri</span>
+                    <span className="text-xs text-muted-foreground">Risk &amp; Gelişim Puanı</span>
                     <span className="text-2xl font-semibold tabular-nums">
                       {debate.pessimist_score}
                     </span>
@@ -745,7 +745,7 @@ export default function CandidateDetailPage() {
                   <CardContent className="flex flex-col items-center gap-1 py-4">
                     <Gavel className="h-4 w-4 text-primary" />
                     <span className="text-xs font-medium text-muted-foreground">
-                      Yapay Zeka Jüri Puanı
+                      Nihai Değerlendirme Puanı
                     </span>
                     <span className="text-2xl font-bold text-primary tabular-nums">
                       {Number(debate.final_score).toFixed(1)}
@@ -764,7 +764,7 @@ export default function CandidateDetailPage() {
                 <CardHeader className="flex-row flex-wrap items-center justify-between gap-2 space-y-0">
                   <CardTitle className="flex items-center gap-2 text-sm">
                     <Gavel className="h-4 w-4 text-primary" />
-                    Hakem Kararı ve Gerekçesi
+                    Genel Karar ve Gerekçe
                   </CardTitle>
                   <div className="flex flex-wrap items-center gap-2">
                     {groundingPercent !== null ? (
@@ -820,7 +820,7 @@ export default function CandidateDetailPage() {
                   <CardHeader className="flex-row items-center justify-between space-y-0 pb-2">
                     <CardTitle className="flex items-center gap-2 text-sm">
                       <ThumbsUp className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
-                      İyimser Ajan Argümanları
+                      Güçlü Yönler Analizi
                     </CardTitle>
                     <Badge
                       variant="outline"
@@ -838,7 +838,7 @@ export default function CandidateDetailPage() {
                   <CardHeader className="flex-row items-center justify-between space-y-0 pb-2">
                     <CardTitle className="flex items-center gap-2 text-sm">
                       <ThumbsDown className="h-4 w-4 text-red-600 dark:text-red-400" />
-                      Kötümser Ajan Risk Analizi
+                      Risk &amp; Gelişim Analizi
                     </CardTitle>
                     <Badge
                       variant="outline"

@@ -74,7 +74,7 @@ function SidebarContent({
       </nav>
 
       <div className="mt-auto border-t border-white/10 pt-3 text-[11px] text-sky-300/60">
-        UltraBERT + Mistral AI
+        Akıllı İşe Alım Platformu
       </div>
     </div>
   );

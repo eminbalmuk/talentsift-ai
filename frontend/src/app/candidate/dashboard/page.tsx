@@ -611,7 +611,7 @@ function CandidateDashboardContent() {
                     CV Yükleme &amp; Profilleştirme
                   </CardTitle>
                   <CardDescription className="text-xs">
-                    PDF, Word (.docx), .txt veya .md formatındaki CV&apos;niz yüklendiğinde otomatik ayrıştırılır ve UltraBERT profilinize işlenir. Bu işlem yalnızca 1 kez yapılır.
+                    PDF, Word (.docx), .txt veya .md formatındaki CV&apos;niz yüklendiğinde otomatik ayrıştırılır ve akıllı aday profilinize işlenir. Bu işlem yalnızca 1 kez yapılır.
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
@@ -869,7 +869,7 @@ function CandidateDashboardContent() {
               <CardHeader>
                 <CardTitle className="text-base">Bildirimler</CardTitle>
                 <CardDescription className="text-xs">
-                  Başvuru sonuçları, mülakat davetleri ve Çok Ajanlı AI Jürisi değerlendirme raporları burada görünür.
+                  Başvuru sonuçları, mülakat davetleri ve ayrıntılı değerlendirme raporları burada görünür.
                 </CardDescription>
               </CardHeader>
               <CardContent>
@@ -1052,7 +1052,7 @@ function CandidateDashboardContent() {
                                     className="mx-auto mb-1 h-3.5 w-3.5 text-emerald-600"
                                     aria-hidden="true"
                                   />
-                                  <div className="text-[11px] text-muted-foreground">İyimser</div>
+                                  <div className="text-[11px] text-muted-foreground">Güçlü Yönler</div>
                                   <div className="tabular-nums text-sm font-semibold text-foreground">
                                     {notification.optimist_score ?? "—"}
                                   </div>
@@ -1062,7 +1062,7 @@ function CandidateDashboardContent() {
                                     className="mx-auto mb-1 h-3.5 w-3.5 text-red-600"
                                     aria-hidden="true"
                                   />
-                                  <div className="text-[11px] text-muted-foreground">Kötümser</div>
+                                  <div className="text-[11px] text-muted-foreground">Gelişim / Risk</div>
                                   <div className="tabular-nums text-sm font-semibold text-foreground">
                                     {notification.pessimist_score ?? "—"}
                                   </div>
@@ -1080,19 +1080,19 @@ function CandidateDashboardContent() {
                               </div>
                               <div>
                                 <p className="mb-1 text-xs font-semibold text-foreground">
-                                  Hakem Gerekçesi
+                                  Genel Değerlendirme Özeti
                                 </p>
                                 <Markdown>{notification.arbitrator_rationale ?? ""}</Markdown>
                               </div>
                               <div>
                                 <p className="mb-1 text-xs font-semibold text-foreground">
-                                  İyimser Ajanın Argümanları
+                                  Öne Çıkan Güçlü Yönler
                                 </p>
                                 <Markdown>{notification.optimist_arguments ?? ""}</Markdown>
                               </div>
                               <div>
                                 <p className="mb-1 text-xs font-semibold text-foreground">
-                                  Kötümser Ajanın Risk Değerlendirmesi
+                                  Dikkat Edilmesi Gerekenler ve Eksikler
                                 </p>
                                 <Markdown>{notification.pessimist_arguments ?? ""}</Markdown>
                               </div>
